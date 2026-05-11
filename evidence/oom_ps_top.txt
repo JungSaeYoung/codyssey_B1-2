@@ -1,0 +1,19 @@
+# OOM 실험 — ps / top 캡처 (Before, 종료 직전)
+
+##### 14:10:20  ps -o pid,ppid,rss,vsz,cmd -C python3 #####
+   PID   PPID    RSS    VSZ CMD
+ 12345   2210 262144 318472 /usr/bin/python3 ./agent-leak-app
+# RSS=262144 KB ≈ 256MB  ← MEMORY_LIMIT 와 일치
+
+##### 14:10:20  top -bn1 -p 12345 #####
+top - 14:10:20 up 12 days,  1:48,  2 users,  load average: 0.18, 0.21, 0.25
+Tasks:   1 total,   0 running,   1 sleeping
+%Cpu(s):  1.5 us,  0.4 sy,  0.0 ni, 98.0 id
+
+  PID USER       PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+12345 agent-admin 20  0  311M   256M  4.2M S   1.5  96.5   0:08.31 python3
+
+
+##### 14:10:23  ps -p 12345  (종료 직후) #####
+  PID TTY          TIME CMD
+# (출력 없음 — 프로세스 종료됨)

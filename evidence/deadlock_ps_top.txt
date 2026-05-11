@@ -1,0 +1,31 @@
+# Deadlock 실험 — ps / top 캡처 (Before, 무응답 진입 후 30분 시점)
+
+##### 18:30:12  ps -ef | grep -v grep | grep agent #####
+agent-admin 15021  2210  0 18:00 pts/1    00:00:01 /usr/bin/python3 ./agent-leak-app
+# → PID 15021 살아있음 (etime=30분)
+
+##### 18:30:12  ps -p 15021 -o pid,stat,etime,cmd #####
+   PID STAT     ELAPSED CMD
+ 15021 Sl         30:12 /usr/bin/python3 ./agent-leak-app
+# STAT 'Sl' = Sleeping + multi-thread → 종료된 게 아니라 모든 스레드가 잠듦
+
+##### 18:30:12  top -H -bn1 -p 15021 #####
+  PID USER       PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+15021 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:01.20 python3
+15022 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:00.18 Worker-A
+15023 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:00.17 Worker-B
+15024 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:00.04 Watchdog
+# 모든 스레드 %CPU=0.0 — TIME+ 누적이 멈춤
+
+##### 18:30:12  ps -L -p 15021 -o lwp,pcpu,stat,wchan:25,cmd #####
+   LWP %CPU STAT WCHAN                     CMD
+ 15021  0.0 Sl   futex_wait_queue_me       python3
+ 15022  0.0 Sl   futex_wait_queue_me       python3   ← Worker-A: futex 락 대기
+ 15023  0.0 Sl   futex_wait_queue_me       python3   ← Worker-B: futex 락 대기
+ 15024  0.0 Sl   poll_schedule_timeout     python3   ← Watchdog: 주기적 깨어남
+# WCHAN(Wait Channel) = 커널이 대기시킨 함수명.
+#   futex_wait_queue_me → 사용자 공간 뮤텍스(락) 대기 중.
+
+##### 18:30:12  curl --max-time 3 http://0.0.0.0:15034 #####
+curl: (28) Operation timed out after 3000 milliseconds with 0 bytes received
+# → 외부에서 봐도 무응답 (TCP accept 루프도 멈춰있음)

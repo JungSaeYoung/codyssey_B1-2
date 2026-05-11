@@ -1,0 +1,19 @@
+# $AGENT_LOG_DIR/agent-leak-app.log — CPU 실험 발췌
+
+### ===== Before: CPU_MAX_OCCUPY=80 =====
+[2026-05-11 16:00:00.221] [INFO]  Boot sequence OK. Agent READY (pid=14001)
+[2026-05-11 16:01:45.910] [INFO]  [Scheduler] dispatch tasks: 8 pending
+[2026-05-11 16:02:30.005] [INFO]  [Worker-3] heavy_compute() loop=120000
+[2026-05-11 16:02:50.318] [INFO]  [Worker-3] computing... iter=24000/120000
+[2026-05-11 16:03:15.812] [WARN]  [Watchdog] cpu=72.5% (threshold 80%) — sustained 60s
+[2026-05-11 16:03:40.221] [WARN]  [Watchdog] cpu=84.1% — exceeded threshold
+[2026-05-11 16:04:11.443] [CRITICAL] [Watchdog] cpu=91.2% > 80% sustained 90s
+[2026-05-11 16:04:11.512] [CRITICAL] [Watchdog] INITIATING EMERGENCY ABORT (SIGTERM)
+>>> [SYSTEM] WATCHDOG: INITIATING EMERGENCY ABORT (SIGTERM) <<<
+[2026-05-11 16:04:12.001] [INFO]  Caught signal SIGTERM, shutting down.
+
+### ===== After: CPU_MAX_OCCUPY=95 =====
+[2026-05-11 16:30:00.118] [INFO]  Boot sequence OK. Agent READY (pid=14502)
+[2026-05-11 16:38:50.502] [WARN]  [Watchdog] cpu=88.4% (threshold 95%) — sustained 30s
+[2026-05-11 16:42:11.880] [CRITICAL] [Watchdog] cpu=95.7% > 95% sustained 60s
+>>> [SYSTEM] WATCHDOG: INITIATING EMERGENCY ABORT (SIGTERM) <<<

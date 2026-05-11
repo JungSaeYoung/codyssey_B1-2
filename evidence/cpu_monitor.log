@@ -1,0 +1,22 @@
+# /var/log/agent-app/monitor.log — CPU 실험 발췌
+
+### ===== Before: CPU_MAX_OCCUPY=80 =====
+[2026-05-11 16:00:00] PID:14001 CPU:2.1%   MEM:6.3% DISK_USED:42%
+[2026-05-11 16:01:00] PID:14001 CPU:3.4%   MEM:6.4% DISK_USED:42%
+[2026-05-11 16:02:00] PID:14001 CPU:38.7%  MEM:6.5% DISK_USED:42%
+[2026-05-11 16:03:00] PID:14001 CPU:72.5%  MEM:6.6% DISK_USED:42%
+[2026-05-11 16:04:00] PID:14001 CPU:91.2%  MEM:6.6% DISK_USED:42%
+[2026-05-11 16:05:00] [ERROR] Application process not running.
+
+### ===== After: CPU_MAX_OCCUPY=95 =====
+[2026-05-11 16:30:00] PID:14502 CPU:2.0%  MEM:6.4% DISK_USED:42%
+[2026-05-11 16:32:00] PID:14502 CPU:14.1% MEM:6.5% DISK_USED:42%
+[2026-05-11 16:35:00] PID:14502 CPU:46.7% MEM:6.6% DISK_USED:42%
+[2026-05-11 16:38:00] PID:14502 CPU:88.4% MEM:6.7% DISK_USED:42%
+[2026-05-11 16:42:00] PID:14502 CPU:95.7% MEM:6.7% DISK_USED:42%
+[2026-05-11 16:43:00] [ERROR] Application process not running.
+
+# 요약:
+#   Before: 종료까지 약 4분 (80% 한도)
+#   After : 종료까지 약 12분 (95% 한도)
+#   - 임계치만 미뤘을 뿐, busy-loop 자체는 동일 — 결국 종료됨.

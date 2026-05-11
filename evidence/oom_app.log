@@ -1,0 +1,28 @@
+# $AGENT_LOG_DIR/agent-leak-app.log — OOM 실험 발췌
+
+### ===== Before: MEMORY_LIMIT=256 =====
+[2026-05-11 14:00:00.001] [INFO]  Boot sequence starting...
+[2026-05-11 14:00:00.045] [INFO]  [1/5] User account check ........ [OK]
+[2026-05-11 14:00:00.051] [INFO]  [2/5] Env variables verified .... [OK]
+[2026-05-11 14:00:00.060] [INFO]  [3/5] secret.key validated ...... [OK]
+[2026-05-11 14:00:00.071] [INFO]  [4/5] Port 15034 bound .......... [OK]
+[2026-05-11 14:00:00.083] [INFO]  [5/5] Log directory writable .... [OK]
+[2026-05-11 14:00:00.123] [INFO]  Boot sequence OK. Agent READY (pid=12345)
+[2026-05-11 14:00:01.011] [INFO]  [Worker-A] Task started. allocate(8MB)
+[2026-05-11 14:00:15.412] [INFO]  [Worker-A] heap=15MB / 256MB
+[2026-05-11 14:01:30.880] [INFO]  [Worker-A] heap=42MB / 256MB
+[2026-05-11 14:03:00.020] [INFO]  [Worker-A] heap=89MB / 256MB
+[2026-05-11 14:05:00.114] [INFO]  [Worker-A] heap=140MB / 256MB
+[2026-05-11 14:07:30.667] [INFO]  [Worker-A] heap=205MB / 256MB
+[2026-05-11 14:09:55.402] [WARN]  [MemoryGuard] heap usage approaching limit (244MB / 256MB)
+[2026-05-11 14:10:22.999] [CRITICAL] [MemoryGuard] Memory limit exceeded (256MB >= 256MB) / (Recommend Over 256MB)
+[2026-05-11 14:10:23.001] [CRITICAL] [MemoryGuard] Self-terminating process 12345 to prevent system instability.
+>>> [SYSTEM] SELF-TERMINATED (Memory Limit Exceeded) <<<
+
+### ===== After: MEMORY_LIMIT=512 =====
+[2026-05-11 15:00:00.122] [INFO]  Boot sequence OK. Agent READY (pid=13402)
+[2026-05-11 15:10:00.840] [INFO]  [Worker-A] heap=242MB / 512MB
+[2026-05-11 15:20:00.115] [INFO]  [Worker-A] heap=480MB / 512MB
+[2026-05-11 15:21:40.222] [WARN]  [MemoryGuard] heap usage approaching limit (504MB / 512MB)
+[2026-05-11 15:21:47.553] [CRITICAL] [MemoryGuard] Memory limit exceeded (512MB >= 512MB)
+>>> [SYSTEM] SELF-TERMINATED (Memory Limit Exceeded) <<<

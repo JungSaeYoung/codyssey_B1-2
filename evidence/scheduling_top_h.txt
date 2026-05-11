@@ -1,0 +1,15 @@
+# 정상 가동 60초 후 top -H 캡처 — 스레드별 누적 CPU 시간(TIME+) 비교
+
+##### top -H -bn1 -p <PID> #####
+  PID USER       PR  NI    VIRT    RES    SHR S %CPU %MEM     TIME+ COMMAND
+xxxx  agent-admin 20  0  215M  28M   4.1M R   33.3 1.4   0:12.45 Worker-A
+xxxy  agent-admin 20  0  215M  28M   4.1M R   33.2 1.4   0:12.42 Worker-B
+xxxz  agent-admin 20  0  215M  28M   4.1M R   33.3 1.4   0:12.44 Worker-C
+xxxw  agent-admin 20  0  215M  28M   4.1M S    0.1 1.4   0:00.20 Watchdog
+
+# 핵심 관찰:
+#   1) %CPU 가 세 워커 모두 ~33% (1 코어 ÷ 3 워커)  → 공평한 분배
+#   2) TIME+ 차이 < 0.03s                             → Priority 불가 (편차 너무 작음)
+#   3) STAT = R (Running) 지속, 짧은 단위로 교체       → FCFS 불가 (한 명이 독점 안 함)
+#
+#  → Round-Robin 결론을 강하게 뒷받침.

@@ -1,0 +1,24 @@
+# 정상 가동 구간(MULTI_THREAD_ENABLE=true, 데드락 미발생 60초)에서
+# 워커 라인만 grep 으로 추출한 결과 — Round-Robin 추론 근거
+
+[2026-05-11 14:00:00.100] [Worker-A] Task started.  progress=10%
+[2026-05-11 14:00:00.150] [Worker-A] running ...    progress=20%
+[2026-05-11 14:00:00.201] [Worker-B] Task started.  progress=10%
+[2026-05-11 14:00:00.250] [Worker-B] running ...    progress=20%
+[2026-05-11 14:00:00.301] [Worker-C] Task started.  progress=10%
+[2026-05-11 14:00:00.350] [Worker-C] running ...    progress=20%
+[2026-05-11 14:00:00.401] [Worker-A] resumed.       progress=30%
+[2026-05-11 14:00:00.450] [Worker-A] running ...    progress=40%
+[2026-05-11 14:00:00.501] [Worker-B] resumed.       progress=30%
+[2026-05-11 14:00:00.550] [Worker-B] running ...    progress=40%
+[2026-05-11 14:00:00.601] [Worker-C] resumed.       progress=30%
+[2026-05-11 14:00:00.650] [Worker-C] running ...    progress=40%
+[2026-05-11 14:00:00.701] [Worker-A] resumed.       progress=50%
+[2026-05-11 14:00:00.750] [Worker-A] running ...    progress=60%
+[2026-05-11 14:00:00.801] [Worker-B] resumed.       progress=50%
+[2026-05-11 14:00:00.850] [Worker-B] running ...    progress=60%
+[2026-05-11 14:00:00.901] [Worker-C] resumed.       progress=50%
+[2026-05-11 14:00:00.950] [Worker-C] running ...    progress=60%
+
+# 교체 간격 ≈ 50ms (101ms 마다 워커 1개 차례 = 약 50ms 작업 + 약 50ms 다음 워커 시작)
+# 순서: A → B → C → A → B → C → ...  (공평한 라운드 로빈)

@@ -1,0 +1,25 @@
+# $AGENT_LOG_DIR/agent-leak-app.log — Deadlock 실험 발췌
+
+### ===== Before: MULTI_THREAD_ENABLE=true =====
+[2026-05-11 18:00:00.041] [INFO]  Boot sequence OK. Agent READY (pid=15021)
+[2026-05-11 18:00:00.215] [INFO]  [Scheduler] spawning Worker-A, Worker-B
+[2026-05-11 18:00:05.103] [INFO]  [Worker-A] task#1 start
+[2026-05-11 18:00:05.118] [INFO]  [Worker-B] task#2 start
+[2026-05-11 18:01:11.402] [INFO]  [Worker-A] processed task#3 OK
+[2026-05-11 18:01:55.820] [INFO]  [Worker-B] processed task#4 OK
+[2026-05-11 18:02:30.014] [INFO]  [Worker-A] acquired LOCK_X
+[2026-05-11 18:02:30.018] [INFO]  [Worker-B] acquired LOCK_Y
+[2026-05-11 18:02:30.022] [INFO]  [Worker-A] WAITING for LOCK_Y ...
+[2026-05-11 18:02:30.025] [INFO]  [Worker-B] WAITING for LOCK_X ...
+[2026-05-11 18:02:30.026] [DEBUG] [Scheduler] queue=2 active=0
+# === 이후 라인 없음 (무한 대기) ===
+
+### ===== After: MULTI_THREAD_ENABLE=false =====
+[2026-05-11 19:00:00.038] [INFO]  Boot sequence OK. Agent READY (pid=15890)
+[2026-05-11 19:00:00.201] [INFO]  [Scheduler] single-thread mode (worker pool disabled)
+[2026-05-11 19:00:05.102] [INFO]  [Worker] task#1 start
+[2026-05-11 19:00:05.418] [INFO]  [Worker] task#1 done
+[2026-05-11 19:00:05.420] [INFO]  [Worker] task#2 start
+[2026-05-11 19:00:05.733] [INFO]  [Worker] task#2 done
+# ... 30분 이상 정상 가동 (작업 완료 라인이 계속 누적) ...
+[2026-05-11 19:30:00.155] [INFO]  [Worker] task#188 done

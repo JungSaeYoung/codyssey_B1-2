@@ -1,0 +1,19 @@
+# CPU 실험 — top / ps 캡처 (Before, 종료 직전)
+
+##### 16:04:00  top -bn1 -o %CPU | head -n 12 #####
+top - 16:04:00 up 12 days,  3:41,  2 users,  load average: 2.85, 1.94, 1.12
+Tasks: 132 total,   2 running, 130 sleeping
+%Cpu(s): 92.3 us,  3.1 sy,  0.0 ni,  4.2 id,  0.0 wa,  0.0 hi,  0.4 si,  0.0 st
+
+  PID USER       PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+14001 agent-admin 20  0   215M    32M  4.1M R  91.2   1.6   3:24.18 python3
+   12 root       20  0     0       0      0 I   0.7   0.0   0:11.20 rcu_sched
+
+##### 16:04:00  ps -o pid,pcpu,pmem,stat,etime,cmd -p 14001 #####
+   PID %CPU %MEM STAT     ELAPSED CMD
+ 14001 91.2  6.6 R+         04:11 /usr/bin/python3 ./agent-leak-app
+
+# 핵심 관찰:
+#   - STAT 'R+'  → 사용자 모드에서 계속 Running, I/O 대기 없음
+#   - %us 92.3   → user space CPU bound (커널 시간 아님)
+#   - %MEM 1.6   → 메모리는 거의 안 씀 → OOM 이 아닌 순수 CPU 폭주
