@@ -321,6 +321,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <body>
   <button id="menu-btn" aria-label="menu">☰</button>
   <div class="controls">
+    <button class="ctl-btn" id="back-btn" onclick="goBack()" hidden>← 뒤로</button>
     <button class="ctl-btn" id="theme-btn" onclick="toggleTheme()">
       <span id="theme-icon">🌙</span><span id="theme-label">Dark</span>
     </button>
@@ -343,11 +344,13 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function renderNav() {{
       const nav = document.getElementById('nav-list');
       nav.innerHTML = DOCS.map((d, i) =>
-        `<li><a href="#" data-i="${{i}}" onclick="loadDoc(${{i}});return false;">${{d.title}}</a></li>`
+        `<li><a href="#" data-i="${{i}}" onclick="navigateTo(${{i}});return false;">${{d.title}}</a></li>`
       ).join('');
     }}
 
-    function loadDoc(i, anchor) {{
+    function render(i, anchor, scrollY) {{
+      if (typeof i !== 'number' || !DOCS[i]) i = currentDoc;   // 잘못된 인덱스 방어
+      currentDoc = i;
       const d = DOCS[i];
       const meta = `<p class="doc-meta">원본: <code>${{d.file}}</code></p>`;
       const content = document.getElementById('content');
@@ -370,9 +373,17 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         const fBase = basename(filePart);
         const idx = DOCS.findIndex(x => basename(x.file) === fBase);
         if (idx >= 0) {{
-          a.onclick = (e) => {{ e.preventDefault(); loadDoc(idx, linkAnchor); }};
+          a.onclick = (e) => {{ e.preventDefault(); navigateTo(idx, linkAnchor); }};
           a.style.cursor = 'pointer';
         }}
+      }});
+
+      // 문서 내부 #앵커(각주 ref/backref 등)는 히스토리를 더럽히지 않고 스크롤만
+      content.querySelectorAll('a[href^="#"]').forEach(a => {{
+        a.addEventListener('click', (e) => {{
+          const t = document.getElementById(a.getAttribute('href').slice(1));
+          if (t) {{ e.preventDefault(); t.scrollIntoView({{ behavior: 'auto', block: 'start' }}); }}
+        }});
       }});
 
       // 활성 nav 표시
@@ -383,24 +394,52 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       // 모바일에서 사이드바 닫기
       document.getElementById('sidebar').classList.remove('open');
 
-      // 앵커가 있으면 해당 헤딩으로 스크롤, 없으면 맨 위.
-      // 렌더가 끝난 직후 DOM 이 안정되도록 다음 프레임에 수행.
-      if (anchor) {{
-        requestAnimationFrame(() => {{
+      // 스크롤 위치 복원 우선순위: scrollY(뒤로가기) > anchor(용어집 점프) > 맨 위.
+      // 콘텐츠 교체 후 레이아웃이 안정되도록 두 프레임 뒤에 수행.
+      const doScroll = () => {{
+        if (typeof scrollY === 'number' && scrollY > 0) {{
+          window.scrollTo(0, scrollY);
+        }} else if (anchor) {{
           const el = document.getElementById(anchor);
           if (el) el.scrollIntoView({{ behavior: 'auto', block: 'start' }});
           else window.scrollTo(0, 0);
-        }});
-      }} else {{
-        window.scrollTo(0, 0);
-      }}
-      localStorage.setItem('lastDoc', i);
+        }} else {{
+          window.scrollTo(0, 0);
+        }}
+      }};
+      requestAnimationFrame(() => requestAnimationFrame(doScroll));
 
-      // 스크롤 스파이용 헤딩 인덱싱
+      localStorage.setItem('lastDoc', i);
       collectSpyTargets();
     }}
 
+    // ── SPA 네비게이션 + 히스토리(뒤로가기) ───────────────────────────
+    // history API 를 단일 소스로 사용한다. pushState 로 이동하고, popstate
+    // (브라우저 뒤로가기 / 우상단 '← 뒤로' 버튼) 에서 떠날 때 저장해 둔 scrollY 로
+    // "보고 있던 위치" 를 복원한다. anchor(용어집 점프)와도 자연스럽게 맞물린다.
+    function curDepth() {{ return (history.state && history.state.depth) || 0; }}
+    function navigateTo(i, anchor) {{
+      // 지금 보던 스크롤 위치를 현재 history 엔트리에 먼저 박아둔다 (뒤로가기 시 복원용)
+      history.replaceState(
+        Object.assign({{}}, history.state, {{ scrollY: window.scrollY }}), '');
+      const depth = curDepth() + 1;
+      history.pushState({{ i: i, anchor: anchor || null, scrollY: 0, depth: depth }}, '');
+      render(i, anchor, 0);
+      updateBackBtn();
+    }}
+    function goBack() {{ history.back(); }}
+    function updateBackBtn() {{
+      const btn = document.getElementById('back-btn');
+      if (btn) btn.hidden = curDepth() <= 0;
+    }}
+    window.addEventListener('popstate', (e) => {{
+      const st = e.state || {{}};
+      render(typeof st.i === 'number' ? st.i : currentDoc, st.anchor, st.scrollY || 0);
+      updateBackBtn();
+    }});
+
     let spyTargets = [];
+    let currentDoc = 0;
     function collectSpyTargets() {{
       spyTargets = Array.from(
         document.querySelectorAll('main.content h2, main.content h3, main.content h4')
@@ -440,8 +479,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('menu-btn').onclick = () =>
         document.getElementById('sidebar').classList.toggle('open');
       renderNav();
+      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
       const last = parseInt(localStorage.getItem('lastDoc') || '0');
-      loadDoc(isNaN(last) || last >= DOCS.length ? 0 : last);
+      const start = (isNaN(last) || last >= DOCS.length) ? 0 : last;
+      history.replaceState({{ i: start, anchor: null, scrollY: 0, depth: 0 }}, '');
+      render(start, null, 0);
+      updateBackBtn();
     }})();
   </script>
 </body>
