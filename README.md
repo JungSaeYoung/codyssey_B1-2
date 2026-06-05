@@ -78,7 +78,14 @@ codyssey_B1-2/
 │   ├── 04_directories_and_acl.sh   ← 디렉토리 + ACL
 │   ├── 05_env_and_keyfile.sh       ← B1-2 사양 env 5종 + 실험용 3종 + secret.key
 │   ├── 06_deploy_app_and_scripts.sh ← agent-leak-app + *.sh 배포 (B1-2 버전)
-│   └── 07_cron_schedule.sh         ← cron 매분/매일 등록
+│   ├── 07_cron_schedule.sh         ← cron 매분/매일 등록
+│   └── experiments/                ← 실험_절차서.md 를 자동 수행하는 검증 파이프라인
+│       ├── 00_run_experiments.sh   ← 4개 실험 일괄/개별 실행 오케스트레이터
+│       ├── lib_experiment.sh       ← 공통 도구 (설정·관측 루프·증거 스냅샷·요약) — 직접 실행 안 함
+│       ├── 01_oom.sh               ← OOM 재현·검증 (MEMORY_LIMIT 256→512)
+│       ├── 02_cpu.sh               ← CPU 과점유 재현·검증 (CPU_MAX_OCCUPY 80→95)
+│       ├── 03_deadlock.sh          ← Deadlock(freeze) 재현·검증 (MULTI_THREAD_ENABLE true→false)
+│       └── 04_scheduling.sh        ← 스케줄링 추론 데이터 수집 (보너스)
 │
 └── tools/
     └── build_docs.py               ← .md → docs/html/index.html 빌더
@@ -189,6 +196,17 @@ cd $AGENT_HOME
 # OOM     : MEMORY_LIMIT=256        다른 건 정상 → 10분 후 SELF-TERMINATED
 # CPU     : CPU_MAX_OCCUPY=80       다른 건 정상 → 4분 후 WATCHDOG SIGTERM
 # Deadlock: MULTI_THREAD_ENABLE=true 다른 건 정상 → 2~4분 후 무응답
+```
+
+위 절차를 **사람 손 없이 자동 수행**하려면 [src/experiments/](src/experiments/) 의 파이프라인을 쓴다
+(환경변수 설정 → 앱 실행 → 자원 샘플링 → ps/top/curl 증거 캡처 → 종료/freeze 판정 → Before/After 비교 → PASS/FAIL 요약):
+
+```bash
+cd $AGENT_HOME/experiments        # 또는 src/experiments 를 머신에 푸시한 경로
+bash 00_run_experiments.sh selftest   # 앱 안 띄우고 환경/권한만 점검
+bash 00_run_experiments.sh all        # 4개 파이프라인 일괄 (oom→cpu→deadlock→scheduling)
+bash 01_oom.sh                        # 파이프라인 하나만 단독 실행
+QUICK=1 bash 00_run_experiments.sh all   # 대기시간 단축 (배선 확인·데모용)
 ```
 
 ### 5.4 관제 모니터링
