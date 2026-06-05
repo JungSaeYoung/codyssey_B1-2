@@ -45,6 +45,8 @@
 codyssey_B1-2/
 ├── README.md                       ← 이 파일 (미션 개요 + 수행 방법)
 ├── 실험_절차서.md                  ← 3개 장애 재현·검증 절차
+├── demo.sh                         ← (macOS) OrbStack 자동 시연 래퍼 — 한 줄로 전체 실행
+├── verify_orbstack.sh              ← (macOS) 머신 생성→setup→부트→실험→증거 수집 드라이버
 │
 ├── docs/
 │   ├── md/
@@ -162,12 +164,37 @@ export MULTI_THREAD_ENABLE="false"
 
 ### 5.1 환경 구축 (OrbStack)
 
+#### (A) 한 줄 자동 실행 — 권장 (macOS)
+
+운영 측 제공 `agent-leak-app` 을 `bin/` 에 둔 뒤, 머신 생성 → §1~§7 setup → agent-leak-app
+부트 검증 → monitor/cron 확인 → 3대 장애 실험 → 증거 수집까지 한 번에 돌린다.
+증거는 `./.verify-artifacts/` 에 모인다.
+
+```bash
+cp ~/Downloads/agent-leak-app bin/agent-leak-app   # 운영 측 제공 바이너리 배치
+
+./demo.sh                 # 시연 모드(섹션마다 엔터) + 실험 전체(실측)
+./demo.sh --quick         # 장애 실험 대기시간 단축 (라이브 시연 권장)
+./demo.sh --no-exp        # setup + 부트 검증까지만 (실험 생략)
+./demo.sh --fast          # 일시정지 없이 끝까지 (CI 처럼)
+
+# demo.sh 없이 드라이버만 직접:
+./verify_orbstack.sh                  # 실험 전체(실측 — OOM ≤25분 등 매우 김)
+QUICK=1 ./verify_orbstack.sh          # 실험 단축
+RUN_EXPERIMENTS=0 ./verify_orbstack.sh # setup+부트만
+FRESH=1 ./verify_orbstack.sh          # 머신 깨끗이 재생성
+```
+
+> ⚠ 실험 '전체(실측)' 는 의도적으로 장애를 재현하므로 매우 오래 걸린다
+> (OOM ≤25분 / CPU ≤15분 / Deadlock ≤10분). 빠른 확인은 `--quick` 또는 `--no-exp`.
+
+#### (B) 수동 단계 실행 (머신 안에서 직접)
+
 ```bash
 # macOS 호스트
 brew install orbstack
 orb create ubuntu:24.04 codyssey-b1-2
 
-# 운영 측 제공 agent-leak-app 을 bin/ 에 미리 두고 함께 push
 cp ~/Downloads/agent-leak-app bin/agent-leak-app
 orb push -m codyssey-b1-2 src/*.sh bin/agent-leak-app /tmp/
 
