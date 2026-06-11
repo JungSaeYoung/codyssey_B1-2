@@ -2,6 +2,7 @@
 
 > 라벨: `analysis`, `bonus`, `area/scheduling`
 > 담당: agent-dev
+> 환경: Ubuntu 24.04 (OrbStack), agent-admin 계정
 > 대상: 정상 가동 중인 `agent-leak-app` (멀티스레드 모드, `MULTI_THREAD_ENABLE=true`, 데드락 미발생 구간)
 
 ---

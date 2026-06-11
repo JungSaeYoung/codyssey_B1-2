@@ -2,7 +2,7 @@
 
 > 라벨: `bug`, `priority/high`, `area/memory`
 > 담당: agent-dev
-> 환경: Ubuntu 22.04 (OrbStack), agent-admin 계정, `MEMORY_LIMIT=256`
+> 환경: Ubuntu 24.04 (OrbStack), agent-admin 계정, `MEMORY_LIMIT=256`
 
 ---
 
@@ -100,7 +100,7 @@ $ top -bn1 -p 12345
 
 ### 4-1. 조치 — 임시: `MEMORY_LIMIT` 상향
 
-`.bash_profile`:
+`~/.bashrc` (환경변수 등록 파일 — `src/05_env_and_keyfile.sh` 가 자동 등록):
 
 ```bash
 # Before
@@ -110,7 +110,7 @@ export MEMORY_LIMIT=256
 export MEMORY_LIMIT=512
 ```
 
-`source ~/.bash_profile` 후 동일 시나리오로 재실행.
+`source ~/.bashrc` 후 동일 시나리오로 재실행.
 
 ### 4-2. Before & After 비교
 
@@ -118,7 +118,7 @@ export MEMORY_LIMIT=512
 | ---- | --------------------------- | -------------------------- |
 | 종료 시점 | 실행 후 **약 10분 23초** | 실행 후 **약 21분 47초** (≈ 2배) |
 | 종료 로그 | `SELF-TERMINATED (Memory Limit Exceeded)` | 동일 로그, 다만 임계치만 늦게 도달 |
-| MEM% 도달 패턴 | 동일한 선형 증가 (3분당 +30%p) | 동일한 선형 증가, 단지 두 배의 임계치 |
+| MEM% 도달 패턴 | 선형 증가, 약 **3분당 +30%p** | 선형 증가지만 한도가 2배(512MB)라 **MEM% 기울기는 약 절반(≈13%p/3분)** |
 
 After 시점의 monitor.log:
 

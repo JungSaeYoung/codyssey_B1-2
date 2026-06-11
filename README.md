@@ -244,6 +244,17 @@ tail -f /var/log/agent-app/monitor.log              # cron 매분 누적
 tail -f $AGENT_LOG_DIR/agent-leak-app.log           # 앱 자체 로그
 ```
 
+라이브 관찰만으로는 리포트에 넣을 **수치**가 안 나온다. `monitor.log` 에서 추세를 뽑거나(`grep`/`awk`), `src/report.sh` 로 구간 통계(Max/Min·도달 시각·평균)를 산출한다:
+
+```bash
+# 특정 PID 의 MEM% 시계열만 추출 (Evidence 표/그래프 재료)
+grep "PID:<pid>" /var/log/agent-app/monitor.log | awk -F'MEM:' '{print $2}' | awk -F'%' '{print $1}'
+
+# 구간 통계 — ====== STATISTICS REPORT ====== ([Memory] Maximum 96.8% at 14:10:00 …)
+bash src/report.sh                                          # 전체
+bash src/report.sh "2026-05-11 14:00:00" "2026-05-11 14:11:00"   # 구간 지정
+```
+
 ---
 
 ## 6. 리포트 작성 가이드

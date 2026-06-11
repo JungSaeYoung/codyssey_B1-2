@@ -2,7 +2,7 @@
 
 > 라벨: `bug`, `priority/high`, `area/cpu`
 > 담당: agent-dev
-> 환경: Ubuntu 22.04 (OrbStack, 4 vCPU), agent-admin 계정, `CPU_MAX_OCCUPY=80`
+> 환경: Ubuntu 24.04 (OrbStack, 4 vCPU), agent-admin 계정, `CPU_MAX_OCCUPY=80`
 
 ---
 
@@ -56,17 +56,17 @@ Tasks: 132 total,   2 running, 130 sleeping
 %Cpu(s): 92.3 us,  3.1 sy,  0.0 ni,  4.2 id,  0.0 wa,  0.0 hi,  0.4 si,  0.0 st
 
   PID USER       PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
-14001 agent-admin 20  0   215M    32M  4.1M R  91.2   1.6   3:24.18 python3
+14001 agent-admin 20  0   215M    32M  4.1M R  91.2   6.6   3:24.18 python3
    12 root       20  0     0       0      0 I   0.7   0.0   0:11.20 rcu_sched
 ```
 
 ```text
 $ ps -o pid,pcpu,pmem,stat,etime,cmd -p 14001
    PID %CPU %MEM STAT     ELAPSED CMD
- 14001 91.2  6.6 R+         04:11 /usr/bin/python3 ./agent-leak-app
+ 14001 91.2  6.6 R+         04:00 /usr/bin/python3 ./agent-leak-app
 ```
 
-> 단일 프로세스가 4-vCPU 머신에서 한 코어 풀(≈ 25% 시스템 전체)을 훨씬 넘는 91%를 점유. STAT가 **`R`(Running)** 으로 지속 — busy-loop 시그니처.
+> 단일 프로세스가 **한 코어의 91%** (top 의 per-process %CPU 는 1코어=100% 정규화이므로 4-vCPU 시스템 전체로는 약 22.8%)를 점유. 시스템 전체 압박은 top 헤더의 `%Cpu(s) 92.3 us` 와 `load average 2.85` 로 별도 확인된다. STAT 가 **`R`(Running)** 으로 지속 — I/O 대기 없이 사용자 모드에서 계속 실행되는 busy-loop 시그니처.
 
 ---
 

@@ -36,6 +36,7 @@ DOCS = [
     ("[2] CPU 과점유 리포트",  REPORTS_DIR / "02_cpu_report.md"),
     ("[3] Deadlock 리포트",    REPORTS_DIR / "03_deadlock_report.md"),
     ("[보너스] 스케줄링 분석", REPORTS_DIR / "04_scheduling_analysis.md"),
+    ("[평가] 평가 문항·채점 기준", MD_DIR / "평가_문항.md"),
 ]
 
 
@@ -288,6 +289,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     main.content h3:hover .headerlink,
     main.content h4:hover .headerlink {{ opacity: 1; }}
 
+    /* Footnotes (주석) — 본문 각주 ref 와 '본문으로 돌아가기(↩)' 링크 */
+    main.content .footnote {{ font-size: .92em; color: var(--fg-muted); }}
+    main.content .footnote > hr {{ margin-top: 2.6em; }}
+    main.content .footnote li {{ scroll-margin-top: 24px; }}
+    main.content sup[id^="fnref"] {{ scroll-margin-top: 84px; }}
+    main.content a.footnote-ref {{ text-decoration: none; padding: 0 2px; }}
+    main.content a.footnote-backref {{
+      text-decoration: none; margin-left: 6px; padding: 1px 8px;
+      border-radius: 6px; color: var(--accent);
+      background: var(--accent-soft); font-size: .95em; white-space: nowrap;
+    }}
+    main.content a.footnote-backref:hover {{
+      background: var(--accent); color: #fff; text-decoration: none;
+    }}
+
+    /* 목차·각주 점프 도착 지점 강조 (어디로 이동했는지 한눈에) */
+    @keyframes jumpFlash {{
+      from {{ background-color: var(--accent-soft); }}
+      to   {{ background-color: transparent; }}
+    }}
+    .jump-flash {{ animation: jumpFlash 1.6s ease-out; border-radius: 4px; }}
+
     /* Doc meta */
     .doc-meta {{
       color: var(--fg-muted); font-size: 13px;
@@ -348,6 +371,32 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       ).join('');
     }}
 
+    // ── 내부 #앵커 스크롤 (목차 · 각주 ref/backref · 헤더 퍼머링크 공통) ──
+    // 네이티브 fragment 이동(href="#id")은 state=null 인 popstate 를 발생시키고,
+    // 그 popstate 핸들러가 render() 를 다시 호출하면서 스크롤이 맨 위로 리셋된다.
+    // (= 좌측 목차 클릭이 '맨 위로 튕기며' 먹통이던 원인.) 기본 동작을 막고
+    // 직접 scrollIntoView 로 이동시킨 뒤 도착 지점을 잠깐 강조한다.
+    function flashTarget(t) {{
+      if (!t) return;
+      t.classList.remove('jump-flash');
+      void t.offsetWidth;            // 리플로우 → 같은 곳 연속 클릭에도 애니메이션 재생
+      t.classList.add('jump-flash');
+    }}
+    function jumpToId(id) {{
+      const t = document.getElementById(id);
+      if (!t) return false;
+      t.scrollIntoView({{ behavior: 'auto', block: 'start' }});
+      flashTarget(t);
+      return true;
+    }}
+    function wireAnchorScroll(root) {{
+      root.querySelectorAll('a[href^="#"]').forEach(a => {{
+        a.addEventListener('click', (e) => {{
+          if (jumpToId(a.getAttribute('href').slice(1))) e.preventDefault();
+        }});
+      }});
+    }}
+
     function render(i, anchor, scrollY) {{
       if (typeof i !== 'number' || !DOCS[i]) i = currentDoc;   // 잘못된 인덱스 방어
       currentDoc = i;
@@ -359,6 +408,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       // TOC 주입
       const toc = document.getElementById('toc');
       toc.innerHTML = `<div class="toc-list">${{d.toc || ''}}</div>`;
+      // 좌측 목차 링크: 네이티브 fragment 이동(→popstate→리셋) 대신 직접 스크롤
+      wireAnchorScroll(toc);
 
       // 내부 .md 링크를 SPA 라우팅으로
       // README.md 는 docs/md/xxx.md 로 가리키고, docs/md 안의 .md 들은 서로
@@ -378,13 +429,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         }}
       }});
 
-      // 문서 내부 #앵커(각주 ref/backref 등)는 히스토리를 더럽히지 않고 스크롤만
-      content.querySelectorAll('a[href^="#"]').forEach(a => {{
-        a.addEventListener('click', (e) => {{
-          const t = document.getElementById(a.getAttribute('href').slice(1));
-          if (t) {{ e.preventDefault(); t.scrollIntoView({{ behavior: 'auto', block: 'start' }}); }}
-        }});
-      }});
+      // 본문 내부 #앵커(각주 ref/backref, 헤더 퍼머링크)도 동일하게 처리
+      wireAnchorScroll(content);
 
       // 활성 nav 표시
       document.querySelectorAll('#nav-list a').forEach(a =>
@@ -401,7 +447,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           window.scrollTo(0, scrollY);
         }} else if (anchor) {{
           const el = document.getElementById(anchor);
-          if (el) el.scrollIntoView({{ behavior: 'auto', block: 'start' }});
+          if (el) {{ el.scrollIntoView({{ behavior: 'auto', block: 'start' }}); flashTarget(el); }}
           else window.scrollTo(0, 0);
         }} else {{
           window.scrollTo(0, 0);
@@ -433,7 +479,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       if (btn) btn.hidden = curDepth() <= 0;
     }}
     window.addEventListener('popstate', (e) => {{
-      const st = e.state || {{}};
+      // 우리가 push/replace 한 히스토리 엔트리는 항상 state 객체를 가진다.
+      // state 가 없는 popstate 는 우리 것이 아니므로(네이티브 fragment 이동 등) 무시한다.
+      if (!e.state) return;
+      const st = e.state;
       render(typeof st.i === 'number' ? st.i : currentDoc, st.anchor, st.scrollY || 0);
       updateBackBtn();
     }});

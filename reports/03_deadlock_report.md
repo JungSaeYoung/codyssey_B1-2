@@ -2,7 +2,7 @@
 
 > 라벨: `bug`, `priority/critical`, `area/concurrency`
 > 담당: agent-dev
-> 환경: Ubuntu 22.04 (OrbStack), agent-admin 계정, `MULTI_THREAD_ENABLE=true`
+> 환경: Ubuntu 24.04 (OrbStack), agent-admin 계정, `MULTI_THREAD_ENABLE=true`
 
 ---
 
@@ -16,7 +16,7 @@
 
 즉 **죽지도 일하지도 않는** 무응답 상태. SIGINT(Ctrl+C)에는 반응하지만 외부 TCP 요청(`curl 0.0.0.0:15034`)에는 응답하지 않는다.
 
-- 발생 시각: 2026-05-11 18:00:00 실행 → 18:02:47 무응답 진입 → 약 30분 방치해도 동일 상태
+- 발생 시각: 2026-05-11 18:00:00 실행 → **18:02:30 앱 로그 정지**(마지막 `WAITING` 라인, [deadlock_app.log](../evidence/deadlock_app.log)) → 18:03:00 monitor 에서 CPU 0.0% 확인(무응답 진입, [deadlock_monitor.log](../evidence/deadlock_monitor.log)) → 약 30분 방치해도 동일 상태
 - 재현성: 같은 설정으로 4회 시도, 4회 모두 1~4분 내 동일 시그니처 관측
 
 ---
@@ -106,7 +106,7 @@ Worker-B 보유: LOCK_Y    →    필요: LOCK_X
 | 3. 비선점 (No Preemption) | 외부에서 락을 강제로 회수하지 않음 — 보유자가 자발적으로 release 해야 함 |
 | 4. 순환 대기 (Circular Wait) | A → Y → B → X → A 의 닫힌 사이클 형성 |
 
-4개 조건 중 **하나만 깨도** 데드락은 발생하지 않는다. 본 미션의 임시 조치(아래 4번 항목)는 조건 1(상호 배제) 자체를 없애는(스레드를 1개로 직렬화) 방식으로 회피한다.
+4개 조건 중 **하나만 깨도** 데드락은 발생하지 않는다. 본 미션의 임시 조치(아래 4번 항목)는 상호 배제 속성 자체를 없애는 것이 아니라, 작업을 단일 스레드로 **직렬화하여 동시 경쟁을 제거**함으로써 ②점유 대기·④순환 대기가 성립하지 못하게 만들어 회피한다.
 
 ### 3-3. 운영체제 동작 원리
 
@@ -131,7 +131,7 @@ export MULTI_THREAD_ENABLE=true
 export MULTI_THREAD_ENABLE=false
 ```
 
-`MULTI_THREAD_ENABLE=false` 모드는 작업을 단일 스레드에서 직렬 처리하므로, 두 스레드가 동시에 락을 잡는 상황 자체가 존재하지 않는다 → 4대 조건의 ①상호 배제 / ④순환 대기 조건을 모두 무력화.
+`MULTI_THREAD_ENABLE=false` 모드는 작업을 단일 스레드에서 직렬 처리하므로, 두 스레드가 동시에 서로 다른 락을 잡고 맞물리는 상황 자체가 생기지 않는다. 락의 **①상호 배제 속성은 그대로**이지만, 동시 경쟁이 사라져 **②점유 대기·④순환 대기가 성립할 수 없으므로** 데드락이 회피된다.
 
 ### 4-2. Before & After 비교
 
@@ -142,6 +142,8 @@ export MULTI_THREAD_ENABLE=false
 | `WCHAN` | 워커 모두 `futex_wait_queue_me` 잠금 대기 | 작업 중에는 `-`(러닝), 대기 시 짧은 `poll_schedule_timeout` |
 | 마지막 로그 | `WAITING for LOCK_*` 에서 정지 | 작업 완료 라인이 지속적으로 누적 |
 | `curl 0.0.0.0:15034` 응답 | **타임아웃** | `Agent OK\n` 즉시 응답 |
+
+> 비고: 위 표의 After(`false`) 행 수치는 [deadlock_app.log](../evidence/deadlock_app.log)·[deadlock_monitor.log](../evidence/deadlock_monitor.log) 의 정상 가동 구간 요약이다. `top -H` 상세 스냅샷은 evidence 에 Before(무응답) 캡처만 포함되어 있으며, After 는 재현 시 동일 명령으로 확인할 수 있다.
 
 After 시점 로그:
 
