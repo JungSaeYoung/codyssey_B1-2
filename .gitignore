@@ -1,0 +1,13 @@
+# ── 재실행(실측) 산출물 ───────────────────────────────────────────────
+# evidence_live/ 는 실험 재실행 결과 전용 폴더다. 저장소 evidence/ (리포트가
+# 1:1 로 인용하는 큐레이션 제출본)를 보존하기 위해, 폴더는 유지하되
+# 내용물은 git 에 올리지 않는다 (README 만 추적).
+/evidence_live/*
+!/evidence_live/README.md
+
+# demo.sh / verify_orbstack.sh 의 휘발성 검증 산출물
+/.verify-artifacts/
+
+# ── OS / 편집기 부산물 ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
