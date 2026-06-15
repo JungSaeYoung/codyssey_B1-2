@@ -31,6 +31,10 @@ WORKDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ART="$WORKDIR/.verify-artifacts"
 LOG="$ART/run.log"
 STAGE="/tmp/codyssey-b1-2"                 # 머신 안 스테이징 디렉토리
+VM_LIVE="/home/agent-admin/evidence_live"  # 머신 안 실험 증거 경로
+LIVE="$WORKDIR/evidence_live"              # 맥 호스트 — 재실행 산출물 누적 폴더
+LIVE_SYNC="${LIVE_SYNC:-1}"               # 1=실험 중 evidence_live 를 맥 폴더로 실시간 동기화
+LIVE_SYNC_INTERVAL="${LIVE_SYNC_INTERVAL:-10}"  # 동기화 간격(초)
 CLEANUP=0
 [[ "${1:-}" == "--cleanup" ]] && CLEANUP=1
 
@@ -373,7 +377,7 @@ s_experiments() {
   • CPU      CPU_MAX_OCCUPY 80→95   Watchdog 자가종료 → 생존 연장 검증
   • Deadlock MULTI_THREAD_ENABLE true→false   freeze(PID 생존+무응답) → 회피 검증
   • Scheduling 정상 가동 구간 워커 로그 수집 (RR 추론 입력)
-  증거는 /home/agent-admin/evidence_live/ 에 쌓이고 마지막에 PASS/FAIL 요약.
+  증거는 머신의 evidence_live/ 에 쌓이고, 도는 동안 맥의 ./evidence_live/ 로 실시간 동기화된다. 마지막에 PASS/FAIL 요약.
   ⚠ 실측 타임아웃이라 매우 오래 걸린다 (OOM ≤25분 / CPU ≤15분 / Deadlock ≤10분)."
     section "Run failure experiments (full)${quick_note}"
     # agent-admin 으로 실험 실행. APP_ENV 주입(앱 부트 조건) + EVIDENCE_DIR 은 admin 쓰기 가능 경로.
@@ -441,9 +445,48 @@ collect_evidence() {
         for f in $(msh_q 'ls /home/agent-admin/evidence_live 2>/dev/null' || true); do
             cp_artifact "/home/agent-admin/evidence_live/$f" "evidence_live/$f"
         done
+        # 맥 호스트의 evidence_live/ 로도 최종 미러 (live 동기화가 꺼져 있어도 보장)
+        mkdir -p "$LIVE"
+        cp -f "$ART"/evidence_live/* "$LIVE/" 2>/dev/null || true
+        ok "live evidence → $LIVE/"
     fi
     ok "evidence saved to $ART/"
 }
+
+# ── 실시간 동기화 (머신 evidence_live → 맥 evidence_live/) ────────────────────
+# 실험이 도는 동안(40~60분) 머신 안 증거를 주기적으로 맥 폴더로 끌어와
+# "산출물이 맥에서 실시간으로 쌓이는" 모습을 보여준다. 순수 추가 기능이라
+# 실패해도(|| true / set +e 서브셸) 실험·요약 로직에는 영향이 없다.
+_live_pull_once() {
+    mkdir -p "$LIVE" 2>/dev/null || true
+    local names f
+    names="$(orb -m "$MACHINE" bash -lc "ls $VM_LIVE 2>/dev/null" 2>/dev/null || true)"
+    for f in $names; do
+        # temp 로 받고 성공 시에만 교체 → 라이브 뷰에 빈/부분 파일이 안 보이게
+        if orb -m "$MACHINE" bash -lc "sudo cat $VM_LIVE/$f" > "$LIVE/.$f.partial" 2>/dev/null; then
+            mv -f "$LIVE/.$f.partial" "$LIVE/$f" 2>/dev/null || true
+        else
+            rm -f "$LIVE/.$f.partial" 2>/dev/null || true
+        fi
+    done
+}
+LIVE_SYNC_PID=""
+start_live_sync() {
+    [[ "$LIVE_SYNC" == "1" && "$RUN_EXPERIMENTS" == "1" ]] || return 0
+    mkdir -p "$LIVE" 2>/dev/null || true
+    ( set +e +u; while :; do _live_pull_once; sleep "$LIVE_SYNC_INTERVAL"; done ) &
+    LIVE_SYNC_PID=$!
+    ok "live 동기화 시작 → $LIVE/ (${LIVE_SYNC_INTERVAL}s 간격)"
+}
+stop_live_sync() {
+    if [[ -n "$LIVE_SYNC_PID" ]]; then
+        kill "$LIVE_SYNC_PID" 2>/dev/null || true
+        wait "$LIVE_SYNC_PID" 2>/dev/null || true
+        LIVE_SYNC_PID=""
+    fi
+}
+trap 'stop_live_sync' EXIT
+trap 'stop_live_sync; exit 130' INT TERM
 
 # ── 메인 흐름 ────────────────────────────────────────────────────────────────
 main() {
@@ -488,7 +531,9 @@ root 직접 로그인을 막아 '일반계정 → sudo' 2단계를 강제한다.
     v7_cron_wait
 
     if [[ "$RUN_EXPERIMENTS" == "1" ]]; then
+        start_live_sync
         s_experiments; v_experiments
+        stop_live_sync
     else
         section "실험 생략 (RUN_EXPERIMENTS=0)"; warn "장애 실험을 건너뜀 — setup+부트 검증만 수행"
     fi
@@ -498,7 +543,7 @@ root 직접 로그인을 막아 '일반계정 → sudo' 2단계를 강제한다.
     narrate "🎉 완료 — 우리가 검증한 것" \
 "§1~§7 인프라 + agent-leak-app 부트 5/5 + monitor/cron 자동화가 모두 검증됐고,
 $([[ "$RUN_EXPERIMENTS" == "1" ]] && echo "3대 장애 실험까지 재현·검증" || echo "(실험은 생략됨)")했다.
-증거는 .verify-artifacts/ 에 있다."
+증거는 .verify-artifacts/ 에 있고, 재실행 산출물은 맥의 ./evidence_live/ 에도 쌓였다."
 
     printf "\n${c_green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${c_reset}\n"
     if [[ "$EXP_WARN" == "1" ]]; then

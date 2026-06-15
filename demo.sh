@@ -158,6 +158,7 @@ ${B}산출물 설명${R}
   ${C}📁 evidence_live/${R}      ${D}— 실험 원본 증거${R}
       oom_*.{log,txt} / cpu_*.{log,txt} / deadlock_*.{log,txt} / scheduling_*
       → reports/0{1,2,3,4}_*.md 의 Evidence 섹션에 인용
+      ${D}(실행 중 맥의 ./evidence_live/ 로도 실시간 누적됨 — 큐레이션된 evidence/ 는 보존)${R}
 
   ${C}📄 run.log${R}             ${D}— 전체 실행 로그 (less -R 권장)${R}
 
