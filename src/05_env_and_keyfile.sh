@@ -58,7 +58,14 @@ sudo chmod 640 "${KEY_PATH}"
 echo
 echo "─── 검증 ────────────────────────────"
 echo "--- AGENT_* / 실험용 ENV (agent-admin login shell) ---"
-sudo -u agent-admin bash -lc 'env | grep -E "^(AGENT_|MEMORY_LIMIT|CPU_MAX_OCCUPY|MULTI_THREAD_ENABLE)"'
+# 주의: Ubuntu 기본 .bashrc 는 맨 위 가드("비대화형이면 return") 때문에
+#   bash -lc(비대화형) 로는 .bashrc 끝에 추가한 export 가 안 보인다 → grep 0건 → set -e 사망.
+#   실제 로그인처럼 대화형(-i)으로 .bashrc 를 로드해 확인하고, 그래도 비면
+#   .bashrc 에 등록된 export 를 그대로 보여준다. (어느 쪽도 못 찾으면 || true 로 데모는 계속)
+sudo -u agent-admin bash -lic \
+    'env | grep -E "^(AGENT_|MEMORY_LIMIT|CPU_MAX_OCCUPY|MULTI_THREAD_ENABLE)"' 2>/dev/null \
+  || sudo grep -E '^export (AGENT_|MEMORY_LIMIT|CPU_MAX_OCCUPY|MULTI_THREAD_ENABLE)' "${AGENT_BASHRC}" \
+  || true
 echo
 echo "--- 키 파일 ---"
 sudo ls -l "${KEY_PATH}"
