@@ -3,7 +3,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # OrbStack 의 Linux 머신을 띄워 B1-2 미션을 자동 setup + 검증 + 장애 실험까지 돌린다.
 #   1) §1~§7 인프라 setup  — 저장소의 src/0N_*.sh 를 그대로 호출 (재구현 X)
-#   2) agent-leak-app 부트 시퀀스 5/5 [OK] + 'Agent READY' 검증
+#   2) agent-leak-app 부트 시퀀스 전 단계 [OK] + 'Agent READY' 검증
 #   3) monitor.sh 수동 실행 + cron 매분 동작 검증
 #   4) src/experiments/ 의 3대 장애(OOM/CPU/Deadlock) + 스케줄링 파이프라인 실행
 #   검증/실험 산출물은 ./.verify-artifacts/ 에 저장된다.
@@ -289,9 +289,9 @@ v6_deploy() {
 
 # ── 부트 시퀀스 ───────────────────────────────────────────────────────────────
 s_boot() {
-    narrate "부트 — agent-leak-app 실행 → Boot Sequence 5/5 [OK] + 'Agent READY'" \
+    narrate "부트 — agent-leak-app 실행 → Boot Sequence 전 단계 [OK] + 'Agent READY'" \
 "백그라운드로 agent-leak-app 을 띄우고 부트 시퀀스 출력이 모두 [OK] 인지 검증한다.
-  부트 5단계: 일반계정 / 환경변수 / 키파일(secret.key) / 포트 15034 / 로그 권한
+  부트 단계: 일반계정 / 환경변수 / 키파일(secret.key) / 포트 15034 / 로그 권한 / 미션 환경(MEMORY_LIMIT·CPU·THREAD)
   ※ .bashrc 는 non-interactive 셸에서 안 읽히므로 env 로 환경변수를 직접 주입.
   정상 가동 조합(MEMORY_LIMIT=512 CPU_MAX_OCCUPY=95 MULTI_THREAD_ENABLE=false)으로 실행."
     section "Boot agent-leak-app & wait for 'Agent READY'"
@@ -313,15 +313,19 @@ die_with_agent_out() {
     die "$1"
 }
 v_boot() {
-    local out n
+    local out total n
     out="$(msh_q 'cat /tmp/agent.out')"
-    for n in 1 2 3 4 5; do
-        echo "$out" | grep -q "\[$n/5\].*\[OK\]" || die_with_agent_out "boot step $n/5 not OK"
+    # 부트 단계 수는 바이너리가 정한다([x/N]); N 을 읽어 그 수만큼 [OK] 인지 확인
+    # → 앱이 5단계든 6단계든 자동 적응 (하드코딩 5/5 로 깨지지 않게).
+    total="$(printf '%s\n' "$out" | grep -oE '\[[0-9]+/[0-9]+\]' | head -n1 | grep -oE '[0-9]+' | tail -n1)"
+    [[ -n "$total" ]] || die_with_agent_out "boot sequence header ([x/N]) not found"
+    for n in $(seq 1 "$total"); do
+        echo "$out" | grep -q "\[$n/$total\].*\[OK\]" || die_with_agent_out "boot step $n/$total not OK"
     done
     echo "$out" | grep -q 'Agent READY' || die_with_agent_out "'Agent READY' not printed"
     msh_q 'sudo ss -tlnH | awk "\$4 ~ /:15034$/ {f=1} END{exit !f}"' \
         || die "port 15034 not LISTEN"
-    ok "5/5 boot OK + Agent READY + LISTEN 15034"
+    ok "$total/$total boot OK + Agent READY + LISTEN 15034"
 }
 
 # ── monitor.sh 수동 실행 ──────────────────────────────────────────────────────
@@ -419,7 +423,7 @@ collect_evidence() {
     narrate "마무리 — 채점·제출용 증거 수집" \
 "§1~§7 + 부트 + 관제 + (실험) 결과를 .verify-artifacts/ 로 모은다.
   • evidence.txt        : ss / ufw / id / ls+getfacl / crontab / monitor.log tail
-  • agent.out           : Boot Sequence 5/5 [OK] + Agent READY
+  • agent.out           : Boot Sequence 전 단계 [OK] + Agent READY
   • monitor.out         : monitor.sh 수동 실행 결과
   • experiments.out     : 장애 실험 PASS/FAIL 요약 (RUN_EXPERIMENTS=1 일 때)
   • evidence_live/*     : OOM/CPU/Deadlock/Scheduling 원본 증거 파일
@@ -542,7 +546,7 @@ root 직접 로그인을 막아 '일반계정 → sudo' 2단계를 강제한다.
     collect_evidence
 
     narrate "🎉 완료 — 우리가 검증한 것" \
-"§1~§7 인프라 + agent-leak-app 부트 5/5 + monitor/cron 자동화가 모두 검증됐고,
+"§1~§7 인프라 + agent-leak-app 부트 전 단계 [OK] + monitor/cron 자동화가 모두 검증됐고,
 $([[ "$RUN_EXPERIMENTS" == "1" ]] && echo "3대 장애 실험까지 재현·검증" || echo "(실험은 생략됨)")했다.
 증거는 .verify-artifacts/ 에 있고, 재실행 산출물은 맥의 ./evidence_live/ 에도 쌓였다."
 

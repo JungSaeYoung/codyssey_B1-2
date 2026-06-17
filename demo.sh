@@ -87,7 +87,7 @@ cat <<EOF
 ${B}시연 흐름${R}
   ${D}1.${R} ${C}codyssey-demo${R} Ubuntu 24.04 머신을 띄운다 (없으면 자동 생성)
   ${D}2.${R} §1~§7 setup + 검증: SSH(20022)·UFW·계정·ACL·env·배포·cron
-  ${D}3.${R} agent-leak-app 부트 5/5 [OK] + 'Agent READY' + monitor.sh·cron 동작
+  ${D}3.${R} agent-leak-app 부트 전 단계 [OK] + 'Agent READY' + monitor.sh·cron 동작
   ${D}4.${R} $([[ "$RUN_EXP" == "1" ]] && echo "3대 장애 실험(OOM/CPU/Deadlock) + 스케줄링 재현·검증" || echo "(장애 실험은 --no-exp 로 생략)")
   ${D}5.${R} 결과 산출물(.verify-artifacts/) 을 Finder 로 자동 오픈
   ${D}6.${R} (옵션) --shell 이면 머신 셸로 진입
@@ -153,7 +153,7 @@ ${B}산출물 설명${R}
   ${C}📄 evidence.txt${R}        ${D}— 채점·제출용 종합 증거${R}
       ss / ufw / id 3계정 / ls+getfacl x3 / secret.key / crontab / monitor.log tail
 
-  ${C}📄 agent.out${R}           ${D}— agent-leak-app Boot Sequence 5/5 [OK] + Agent READY${R}
+  ${C}📄 agent.out${R}           ${D}— agent-leak-app Boot Sequence 전 단계 [OK] + Agent READY${R}
 
   ${C}📄 monitor.out${R}         ${D}— monitor.sh 수동 실행 결과 (HEALTH/RESOURCE/INFO)${R}
 
