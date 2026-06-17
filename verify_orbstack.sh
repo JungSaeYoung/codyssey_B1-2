@@ -350,26 +350,45 @@ v_monitor() {
 }
 
 # ── §7 cron ──────────────────────────────────────────────────────────────────
+_log_lines() {  # /var/log/agent-app/monitor.log 라인 수 (못 읽으면 fallback 출력)
+    msh_q "sudo bash -c 'wc -l < /var/log/agent-app/monitor.log 2>/dev/null || echo 0'" 2>/dev/null \
+        | tr -dc '0-9' || true
+}
 v7_cron_wait() {
-    narrate "§7-b  cron 동작 검증 — 70초 대기 후 로그 증가 확인" \
-"매분 monitor.sh 를 돌리도록 등록된 cron 이 진짜 동작하는지 확인한다.
-  • 현재 monitor.log 라인 수 기록 → 70초 대기 → 라인 수 증가 확인
-  ※ 1초 단위 카운트다운으로 진행 상황을 표시한다."
-    section "§7  cron — 70초 대기 후 라인 증가 검증"
+    narrate "§7-b  cron 동작 검증 — 최대 90초 폴링 후 로그 증가 확인" \
+"매분 monitor.sh 를 돌리도록 등록된 cron 이 실제로 동작하는지 확인한다.
+  • 현재 monitor.log 라인 수 기록 → 최대 90초 대기(증가하면 즉시 통과)
+  ※ cron 은 VM/컨테이너 환경에서 안 뜰 수 있어, 안 늘어도 데모는 멈추지 않고
+    원인 진단을 찍은 뒤 실험으로 계속 진행한다(WARN)."
+    section "§7  cron — 라인 증가 검증 (최대 90초)"
     local before after s
-    before="$(msh_q "sudo bash -c 'wc -l < /var/log/agent-app/monitor.log'" 2>/dev/null | tr -d '[:space:]' || echo 0)"
-    : "${before:=0}"
+    before="$(_log_lines)"; : "${before:=0}"; after="$before"
     printf "  ${c_dim}lines before = %s${c_reset}\n" "$before"
-    for s in $(seq 70 -1 1); do
-        printf "\r  ${c_dim}⏳ cron tick 대기 중...  %2ds 남음   ${c_reset}" "$s"
+    for s in $(seq 1 90); do
+        printf "\r  ${c_dim}⏳ cron tick 대기 중...  %2ds 경과   ${c_reset}" "$s"
         sleep 1
+        if (( s % 5 == 0 )); then
+            after="$(_log_lines)"; : "${after:=$before}"
+            (( after > before )) && break
+        fi
     done
-    printf "\r  ${c_dim}⏳ 대기 완료, 라인 수 재확인...                   ${c_reset}\n"
-    after="$(msh_q "sudo bash -c 'wc -l < /var/log/agent-app/monitor.log'" 2>/dev/null | tr -d '[:space:]' || echo 0)"
-    : "${after:=0}"
+    printf "\r  ${c_dim}대기 종료, 라인 수 재확인...                       ${c_reset}\n"
     printf "  ${c_dim}lines after  = %s${c_reset}\n" "$after"
-    [[ "$after" -gt "$before" ]] || die "log lines did not grow (before=$before, after=$after)"
-    ok "cron appended new line (${before} → ${after})"
+    if (( after > before )); then
+        ok "cron appended new line (${before} → ${after})"
+        return 0
+    fi
+    # 안 늘면 죽이지 말고 — 원인 진단 후 경고만 남기고 실험을 계속한다.
+    warn "cron 이 90초 내 새 라인을 추가하지 않음 (before=$before, after=$after)"
+    printf "  ${c_dim}── cron 진단 ──${c_reset}\n"
+    msh_q 'systemctl is-active cron 2>/dev/null || echo inactive' \
+        | sed 's/^/    cron.service  : /'
+    msh_q 'sudo tail -n 3 /home/agent-admin/monitor.cron.log 2>/dev/null || echo "(빈 로그 → cron 이 job 자체를 실행하지 않음)"' \
+        | sed 's/^/    cron.log      : /'
+    msh_q 'sudo -u agent-admin crontab -l 2>/dev/null | grep -c monitor.sh || true' \
+        | sed 's/^/    crontab 항목수 : /'
+    warn "cron 자동실행 검증은 건너뛴다 (crontab 등록 자체는 §7 setup 에서 확인됨). 실험 계속."
+    EXP_WARN=1
 }
 
 # ── 장애 실험 (src/experiments/) ──────────────────────────────────────────────

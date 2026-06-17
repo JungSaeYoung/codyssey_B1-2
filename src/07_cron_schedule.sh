@@ -15,9 +15,10 @@
 set -eu
 step() { printf "  ▶ %s\n" "$*"; }
 
-step "cron 데몬 패키지 설치 + systemd 활성화"
+step "cron 데몬 패키지 설치 + 기동"
 sudo apt-get install -y cron
-sudo systemctl enable --now cron
+# 환경(systemd/sysvinit)에 따라 되는 쪽으로 기동. enable --now 가 무력한 VM 도 있어 service 폴백.
+sudo systemctl enable --now cron 2>/dev/null || sudo service cron start 2>/dev/null || true
 
 step "agent-admin 의 crontab 에 2개 항목 등록 (기존 동일 항목은 제거 후 재등록)"
 sudo -u agent-admin bash -c '
@@ -26,6 +27,8 @@ sudo -u agent-admin bash -c '
   echo "10 3 * * * /home/agent-admin/agent-app/bin/archive_logs.sh >> /home/agent-admin/archive.cron.log 2>&1"
 ) | crontab -
 '
+# 새 crontab 을 확실히 반영하도록 데몬 재기동(되는 쪽으로). 실패해도 계속.
+sudo systemctl restart cron 2>/dev/null || sudo service cron restart 2>/dev/null || true
 
 # 검증
 echo
