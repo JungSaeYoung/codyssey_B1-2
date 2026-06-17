@@ -29,5 +29,6 @@ EVIDENCE_DIR="$(git rev-parse --show-toplevel)/evidence_live" \
 ```
 
 > - 실험 실행에는 `agent-leak-app`(Linux ELF)이 도는 환경(OrbStack Ubuntu VM 등)이 필요하다.
-> - `demo.sh` / `verify_orbstack.sh` 로 돌리면 결과는 호스트의 `.verify-artifacts/evidence_live/` 에도 모인다.
+> - `demo.sh` / `verify_orbstack.sh` 로 돌리면 실험 원본 증거가 (실행 중 실시간 + 종료 시 최종) **바로 이 폴더**에 쌓인다.
+>   검증 로그(`evidence.txt` / `agent.out` / `run.log` 등)는 별도로 `.verify-artifacts/` 에 모인다.
 > - 이 폴더의 산출물은 `.gitignore` 로 git 추적에서 제외된다 (이 `README.md` 만 추적).

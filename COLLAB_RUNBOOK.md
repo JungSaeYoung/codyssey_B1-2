@@ -45,7 +45,7 @@
 ```bash
 cp ~/Downloads/agent-leak-app bin/agent-leak-app
 ./verify_orbstack.sh            # 전체 실측 (오래 걸림) — 또는 QUICK=1 ./verify_orbstack.sh
-# 산출물: .verify-artifacts/evidence_live/{oom,cpu,deadlock,scheduling}_*
+# 산출물: ./evidence_live/{oom,cpu,deadlock,scheduling}_*  (검증 로그는 .verify-artifacts/)
 ```
 
 ### 3-2. 브랜치 → 변경 → PR (OOM 예시, #1)
@@ -54,8 +54,8 @@ cp ~/Downloads/agent-leak-app bin/agent-leak-app
 git switch -c verify/oom
 
 # 실측 로그를 제출용 evidence/ 로 반영 (예시 덮어쓰기)
-cp .verify-artifacts/evidence_live/oom_*.log  evidence/
-cp .verify-artifacts/evidence_live/oom_*.txt  evidence/
+cp evidence_live/oom_*.log  evidence/
+cp evidence_live/oom_*.txt  evidence/
 #   필요 시 reports/01_oom_report.md 의 §4 Before/After 수치를 실측값으로 갱신
 
 git add evidence/oom_* reports/01_oom_report.md

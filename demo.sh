@@ -141,10 +141,14 @@ banner "▶ verify_orbstack.sh 실행 (MACHINE=$MACHINE_NAME, FRESH=${FRESH:-0},
 
 # ── 결과 안내 + Finder 열기 ──────────────────────────────────────────────────
 ART_DIR="$(pwd)/.verify-artifacts"
+LIVE_DIR="$(pwd)/evidence_live"
 banner "✅ 시연 완료 — 산출물 안내"
-printf "  📁  %s\n" "$ART_DIR"
+printf "  📁  %s   ${D}(검증 산출물)${R}\n" "$ART_DIR"
 printf "\n${D}파일 목록:${R}\n"
 ls -lh "$ART_DIR" 2>/dev/null | sed 's/^/    /'
+printf "\n  📁  %s   ${D}(실험 원본 증거 — 실행 중 실시간 누적)${R}\n" "$LIVE_DIR"
+printf "${D}파일 목록:${R}\n"
+ls -lh "$LIVE_DIR" 2>/dev/null | grep -v '^total\|README' | sed 's/^/    /'
 
 cat <<EOF
 
@@ -160,16 +164,16 @@ ${B}산출물 설명${R}
   ${C}📄 experiments.out${R}     ${D}— 3대 장애 + 스케줄링 PASS/FAIL 요약${R}
       ${D}(RUN_EXPERIMENTS=1 일 때만)${R}
 
-  ${C}📁 evidence_live/${R}      ${D}— 실험 원본 증거${R}
+  ${C}📁 ../evidence_live/${R}   ${D}— 실험 원본 증거 (레포 루트, .verify-artifacts 밖)${R}
       oom_*.{log,txt} / cpu_*.{log,txt} / deadlock_*.{log,txt} / scheduling_*
-      → reports/0{1,2,3,4}_*.md 의 Evidence 섹션에 인용
-      ${D}(실행 중 맥의 ./evidence_live/ 로도 실시간 누적됨 — 큐레이션된 evidence/ 는 보존)${R}
+      실행 중 실시간으로 쌓이며, 큐레이션된 evidence/ 는 보존된다.
 
   ${C}📄 run.log${R}             ${D}— 전체 실행 로그 (less -R 권장)${R}
 
 ${B}빠르게 다시 보기${R}
   cat $ART_DIR/evidence.txt
   cat $ART_DIR/experiments.out
+  ls -l $LIVE_DIR            # 실험 원본 증거
   less -R $ART_DIR/run.log
 
 EOF

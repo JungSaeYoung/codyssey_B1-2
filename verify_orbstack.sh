@@ -426,9 +426,9 @@ collect_evidence() {
   • agent.out           : Boot Sequence 전 단계 [OK] + Agent READY
   • monitor.out         : monitor.sh 수동 실행 결과
   • experiments.out     : 장애 실험 PASS/FAIL 요약 (RUN_EXPERIMENTS=1 일 때)
-  • evidence_live/*     : OOM/CPU/Deadlock/Scheduling 원본 증거 파일
-  • run.log             : 전체 실행 로그 (less -R 권장)"
-    section "Collect evidence into $ART"
+  • run.log             : 전체 실행 로그 (less -R 권장)
+  실험 원본 증거(OOM/CPU/Deadlock/Scheduling)는 레포 ./evidence_live/ 로 떨어진다."
+    section "Collect evidence (.verify-artifacts/ + ./evidence_live/)"
     {
         echo '=== ss -tulnp ===';                          msh_q 'sudo ss -tulnp'
         echo; echo '=== ufw status verbose ===';           msh_q 'sudo ufw status verbose'
@@ -443,17 +443,15 @@ collect_evidence() {
     } > "$ART/evidence.txt"
     cp_artifact /tmp/agent.out agent.out
 
-    # 실험 원본 증거 파일들 복사
+    # 실험 원본 증거 → 레포 ./evidence_live/ 로 직접 복사
+    # (.verify-artifacts 안에 evidence_live 를 중복 생성하지 않는다)
     if [[ "$RUN_EXPERIMENTS" == "1" ]]; then
-        mkdir -p "$ART/evidence_live"
+        mkdir -p "$LIVE"
         local f
         for f in $(msh_q 'ls /home/agent-admin/evidence_live 2>/dev/null' || true); do
-            cp_artifact "/home/agent-admin/evidence_live/$f" "evidence_live/$f"
+            msh_q "sudo cat /home/agent-admin/evidence_live/$f" > "$LIVE/$f" 2>/dev/null || true
         done
-        # 맥 호스트의 evidence_live/ 로도 최종 미러 (live 동기화가 꺼져 있어도 보장)
-        mkdir -p "$LIVE"
-        cp -f "$ART"/evidence_live/* "$LIVE/" 2>/dev/null || true
-        ok "live evidence → $LIVE/"
+        ok "experiment evidence → $LIVE/"
     fi
     ok "evidence saved to $ART/"
 }
