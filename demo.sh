@@ -120,7 +120,12 @@ ${D}예상 소요: setup+부트 ~3분 / 실험 전체 +40분~1시간 / --quick �
 
 EOF
 
-read -p "엔터로 시작 (Ctrl+C 로 취소): " _
+# --fast(NARRATE_MODE=0) 는 완전 무인 실행 — 초기 엔터도 건너뛴다.
+if [[ "$NARRATE_MODE" == "1" ]]; then
+    read -p "엔터로 시작 (Ctrl+C 로 취소): " _
+else
+    printf "${D}(--fast: 무인 실행 — 엔터 대기 없이 바로 시작)${R}\n"
+fi
 
 # ── 본 실행 ──────────────────────────────────────────────────────────────────
 export MACHINE_NAME="codyssey-demo"

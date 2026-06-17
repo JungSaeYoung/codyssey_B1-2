@@ -258,7 +258,8 @@ v4_acl() {
 v5_env() {
     local kp env_out
     # AGENT_KEY_PATH 는 '디렉토리' 여야 한다 (B1-1 의 파일 경로와 다른 핵심 차이)
-    msh_q 'test -d /home/agent-admin/agent-app/api_keys' \
+    # 주: orb 기본 사용자는 /home/agent-admin(750) 를 탐색할 수 없으므로 sudo 필수
+    msh_q 'sudo test -d /home/agent-admin/agent-app/api_keys' \
         || die "AGENT_KEY_PATH(api_keys) is not a directory"
     # secret.key 내용/권한
     kp=/home/agent-admin/agent-app/api_keys/secret.key
@@ -267,7 +268,7 @@ v5_env() {
     msh_q "sudo stat -c '%U:%G %a' $kp" | grep -q 'agent-admin:agent-core 640' \
         || die "secret.key owner/perm != agent-admin:agent-core 640"
     # 실험용 ENV 3종이 agent-admin .bashrc 에 등록돼 있는지
-    env_out="$(msh_q 'grep -E "MEMORY_LIMIT|CPU_MAX_OCCUPY|MULTI_THREAD_ENABLE" /home/agent-admin/.bashrc')"
+    env_out="$(msh_q 'sudo grep -E "MEMORY_LIMIT|CPU_MAX_OCCUPY|MULTI_THREAD_ENABLE" /home/agent-admin/.bashrc' || true)"
     echo "$env_out" | grep -q 'MEMORY_LIMIT'        || die ".bashrc missing MEMORY_LIMIT"
     echo "$env_out" | grep -q 'CPU_MAX_OCCUPY'      || die ".bashrc missing CPU_MAX_OCCUPY"
     echo "$env_out" | grep -q 'MULTI_THREAD_ENABLE' || die ".bashrc missing MULTI_THREAD_ENABLE"
@@ -276,11 +277,11 @@ v5_env() {
 
 # ── §6 배포 ───────────────────────────────────────────────────────────────────
 v6_deploy() {
-    msh_q 'test -x /home/agent-admin/agent-app/agent-leak-app' \
+    msh_q 'sudo test -x /home/agent-admin/agent-app/agent-leak-app' \
         || die "agent-leak-app not installed/executable at \$AGENT_HOME"
     local b
     for b in monitor.sh report.sh archive_logs.sh; do
-        msh_q "test -x /home/agent-admin/agent-app/bin/$b" \
+        msh_q "sudo test -x /home/agent-admin/agent-app/bin/$b" \
             || die "$b not installed/executable in \$AGENT_HOME/bin"
     done
     ok "agent-leak-app (0750) + monitor/report/archive_logs.sh (0750) deployed"
