@@ -467,7 +467,7 @@ collect_evidence() {
     if [[ "$RUN_EXPERIMENTS" == "1" ]]; then
         mkdir -p "$LIVE"
         local f
-        for f in $(msh_q 'ls /home/agent-admin/evidence_live 2>/dev/null' || true); do
+        for f in $(msh_q 'sudo ls /home/agent-admin/evidence_live 2>/dev/null' || true); do
             msh_q "sudo cat /home/agent-admin/evidence_live/$f" > "$LIVE/$f" 2>/dev/null || true
         done
         ok "experiment evidence → $LIVE/"
@@ -482,7 +482,7 @@ collect_evidence() {
 _live_pull_once() {
     mkdir -p "$LIVE" 2>/dev/null || true
     local names f
-    names="$(orb -m "$MACHINE" bash -lc "ls $VM_LIVE 2>/dev/null" 2>/dev/null || true)"
+    names="$(orb -m "$MACHINE" bash -lc "sudo ls $VM_LIVE 2>/dev/null" 2>/dev/null || true)"
     for f in $names; do
         # temp 로 받고 성공 시에만 교체 → 라이브 뷰에 빈/부분 파일이 안 보이게
         if orb -m "$MACHINE" bash -lc "sudo cat $VM_LIVE/$f" > "$LIVE/.$f.partial" 2>/dev/null; then
