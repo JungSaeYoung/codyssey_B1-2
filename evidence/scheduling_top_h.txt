@@ -1,15 +1,102 @@
-# 정상 가동 60초 후 top -H 캡처 — 스레드별 누적 CPU 시간(TIME+) 비교
-
-##### top -H -bn1 -p <PID> #####
-  PID USER       PR  NI    VIRT    RES    SHR S %CPU %MEM     TIME+ COMMAND
-xxxx  agent-admin 20  0  215M  28M   4.1M R   33.3 1.4   0:12.45 Worker-A
-xxxy  agent-admin 20  0  215M  28M   4.1M R   33.2 1.4   0:12.42 Worker-B
-xxxz  agent-admin 20  0  215M  28M   4.1M R   33.3 1.4   0:12.44 Worker-C
-xxxw  agent-admin 20  0  215M  28M   4.1M S    0.1 1.4   0:00.20 Watchdog
-
-# 핵심 관찰:
-#   1) %CPU 가 세 워커 모두 ~33% (1 코어 ÷ 3 워커)  → 공평한 분배
-#   2) TIME+ 차이 < 0.03s                             → Priority 불가 (편차 너무 작음)
-#   3) STAT = R (Running) 지속, 짧은 단위로 교체       → FCFS 불가 (한 명이 독점 안 함)
+# =============================================================================
+# 스케줄링 추론용 스레드 스냅샷 (보너스)  [B1-2-B1]
+# =============================================================================
+#   ※ 이 파일은 위 환경에서 실제로 실행해 받은 산출물이다. 과제 PDF 예시가 아니다.
+#   수집 시각: 2026-08-26 09:20:14 (§1) / 09:28:29 ~ 09:29:39 (§2) (KST)
+#   호스트   : devjsy / Ubuntu 24.04.4 LTS / Linux 6.8.0-138-generic x86_64 / 16 vCPU / 62 GiB RAM / CLK_TCK=100
+#   실행 계정: ashofrondol (uid=1000) — root 아님 (B1-2-P1 충족)
+#   바이너리 : $AGENT_HOME/agent-leak-app  (md5 0fb02e12554328b32e6e1adac861630e, repo bin/ 과 동일)
 #
-#  → Round-Robin 결론을 강하게 뒷받침.
+#   사전 환경변수:
+#   export AGENT_HOME=/home/ashofrondol/b12_sandbox/agent-app
+#   export AGENT_PORT=15034
+#   export AGENT_UPLOAD_DIR="$AGENT_HOME/upload_files"
+#   export AGENT_KEY_PATH="$AGENT_HOME/api_keys"      # secret.key = "agent_api_key_test"
+#   export AGENT_LOG_DIR=/home/ashofrondol/b12_sandbox/logs
+#   실험 환경변수: MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=false  (= [Healthy System Monitoring])
+#
+#   수집 명령:
+#   cd $REPO && EVIDENCE_DIR="$PWD/evidence" SCHED_DURATION=120 bash src/experiments/00_run_experiments.sh scheduling
+#   #   (04_scheduling.sh 가 수집 종료 직전에 top -H -bn1 -p $PID 1회 실행)   # §1
+#   
+#   # §2 는 스레드별 CPU 누적(TIME+)이 실제로 전진하는지 보려고 10s / 40s / 80s 세 시점에
+#   #    같은 명령을 반복한 보강 캡처다 (데드락 케이스의 '정지' 와 대조용):
+#   top -H -bn1 -p $PID | tail -5
+#   ps -L -p $PID -o lwp,pcpu,stat,wchan:20,time,cmd
+#   grep -E '^(Threads|voluntary|nonvoluntary)' /proc/$PID/status
+#
+#   대조 포인트 — 같은 명령을 데드락 구간에서 찍은 것이 deadlock_ps_top.txt §2 다.
+#     정상: 워커 스레드 TIME+ 가 0:00.01 → 0:00.13 → 0:00.33 으로 전진, WCHAN=do_select
+#     데드락: 30s·120s·210s 세 시점 모두 TIME+ 0:00.00 고정, WCHAN=futex_wait_queue
+# =============================================================================
+
+
+#-----------------------------------------------------------------------------
+# §1. 파이프라인이 남긴 top -H 스냅샷
+#-----------------------------------------------------------------------------
+
+top - 09:20:10 up 3 days, 16:30,  4 users,  load average: 0.06, 0.21, 0.44
+Threads:   3 total,   0 running,   3 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  1.2 sy,  0.0 ni, 98.2 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14796.6 free,  24234.4 used,  25388.8 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39443.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2765906 ashofro+  30  10  695860 479196   9828 S   0.0   0.7   0:00.05 agent-l+
+2765955 ashofro+  30  10  695860 479196   9828 S   0.0   0.7   0:00.53 agent-l+
+2765956 ashofro+  30  10  695860 479196   9828 S   0.0   0.7   0:00.32 agent-l+
+
+#-----------------------------------------------------------------------------
+# §2. 보강 캡처 — 10s / 40s / 80s 시점의 스레드 상태 (별도 실행)
+#-----------------------------------------------------------------------------
+
+##### t≈10s  2026-08-26 09:28:29  (MULTI_THREAD_ENABLE=false / Healthy System Monitoring) #####
+$ top -H -bn1 -p 2780021 | tail -5
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2780021 ashofro+  30  10  197176  43976   9840 S   0.0   0.1   0:00.05 agent-l+
+2780050 ashofro+  30  10  197176  43976   9840 S   0.0   0.1   0:00.01 agent-l+
+2780051 ashofro+  30  10  197176  43976   9840 S   0.0   0.1   0:00.00 agent-l+
+$ ps -L -p 2780021 -o lwp,pcpu,stat,wchan:20,time,cmd
+    LWP %CPU STAT WCHAN                    TIME CMD
+2780021  0.9 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2780050  0.4 SNl  do_select            00:00:00 ./agent-leak-app
+2780051  0.0 SNl  do_select            00:00:00 ./agent-leak-app
+$ grep -E '^(Threads|voluntary|nonvoluntary)' /proc/2780021/status
+Threads:	3
+voluntary_ctxt_switches:	30
+nonvoluntary_ctxt_switches:	1
+
+##### t≈40s  2026-08-26 09:28:59  (MULTI_THREAD_ENABLE=false / Healthy System Monitoring) #####
+$ top -H -bn1 -p 2780021 | tail -5
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2780021 ashofro+  30  10  453216 300016   9840 S   0.0   0.5   0:00.05 agent-l+
+2780050 ashofro+  30  10  453216 300016   9840 S   0.0   0.5   0:00.13 agent-l+
+2780051 ashofro+  30  10  453216 300016   9840 S   0.0   0.5   0:00.08 agent-l+
+$ ps -L -p 2780021 -o lwp,pcpu,stat,wchan:20,time,cmd
+    LWP %CPU STAT WCHAN                    TIME CMD
+2780021  0.1 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2780050  0.4 SNl  do_select            00:00:00 ./agent-leak-app
+2780051  0.2 SNl  do_select            00:00:00 ./agent-leak-app
+$ grep -E '^(Threads|voluntary|nonvoluntary)' /proc/2780021/status
+Threads:	3
+voluntary_ctxt_switches:	30
+nonvoluntary_ctxt_switches:	1
+
+##### t≈80s  2026-08-26 09:29:39  (MULTI_THREAD_ENABLE=false / Healthy System Monitoring) #####
+$ top -H -bn1 -p 2780021 | tail -5
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2780021 ashofro+  30  10  237108  95184   9840 S   0.0   0.1   0:00.05 agent-l+
+2780050 ashofro+  30  10  237108  95184   9840 S   0.0   0.1   0:00.33 agent-l+
+2780051 ashofro+  30  10  237108  95184   9840 S   0.0   0.1   0:00.19 agent-l+
+$ ps -L -p 2780021 -o lwp,pcpu,stat,wchan:20,time,cmd
+    LWP %CPU STAT WCHAN                    TIME CMD
+2780021  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2780050  0.4 SNl  do_select            00:00:00 ./agent-leak-app
+2780051  0.2 SNl  do_select            00:00:00 ./agent-leak-app
+$ grep -E '^(Threads|voluntary|nonvoluntary)' /proc/2780021/status
+Threads:	3
+voluntary_ctxt_switches:	30
+nonvoluntary_ctxt_switches:	1

@@ -6,10 +6,12 @@
 #   각 파이프라인 본체는 같은 디렉토리의 번호 스크립트에 들어 있고, 이 파일은
 #   사전 점검 → 선택한 파이프라인 실행 → PASS/FAIL 요약을 묶는 wrapper 다.
 #
-#     01_oom.sh        MEMORY_LIMIT=256 → SELF-TERMINATED 까지 관측 → 512 로 올려 생존 연장 검증
-#     02_cpu.sh        CPU_MAX_OCCUPY=80 → WATCHDOG SIGTERM 관측 → 95 로 올려 연장 검증
+#     01_oom.sh        MEMORY_LIMIT=256 → MemoryGuard 자가종료 관측 → 512 로 올려 생존 연장 검증
+#                      (CPU_MAX_OCCUPY=10 고정: 95 로 두면 CpuWorker 가 34초에 대신 죽여 After 가 무의미)
+#     02_cpu.sh        CPU_MAX_OCCUPY=80 → [CpuWorker] CPU Threshold Violated!(SIGTERM) 관측
+#                      → 10 으로 '내려' 종료 소멸 검증 (트립 라인은 고정 50% 라 95 상향은 효과 0 — 실측)
 #     03_deadlock.sh   MULTI_THREAD_ENABLE=true → 무응답(freeze) 관측 → false 로 회피 검증
-#     04_scheduling.sh 정상 가동 구간 워커 로그 수집 (Round-Robin 추론 입력)
+#     04_scheduling.sh [Healthy System Monitoring] 구간의 [Scheduler] 교체 로그 수집 (Round-Robin 추론 입력)
 #     lib_experiment.sh  위 네 스크립트가 공유하는 설정·헬퍼·관측 루프·요약 (직접 실행 안 함)
 #
 # 산출물 (EVIDENCE_DIR, 기본 = 저장소 루트의 evidence_live/):
@@ -18,8 +20,8 @@
 #     deadlock_monitor.log  deadlock_app.log  deadlock_ps_top.txt
 #     scheduling_workers.log  scheduling_top_h.txt
 #
-#   ※ 저장소 evidence/ 안의 파일들은 "형식 예시"(실제 실행 로그 아님)이므로,
-#     기본 출력은 evidence_live/ 로 분리해 예시를 덮어쓰지 않는다.
+#   ※ 기본 출력은 evidence_live/ 다. 제출용 evidence/ 를 직접 갱신하려면
+#     EVIDENCE_DIR="$REPO/evidence" 를 명시한다 (현재 evidence/ 는 이 파이프라인 실측 산출물).
 #
 # 어디서 실행하나?
 #   OrbStack Ubuntu 머신 안에서, agent-admin 같은 "일반 계정" 으로 실행한다 (root 금지).

@@ -39,8 +39,10 @@ export AGENT_LOG_DIR="/var/log/agent-app"
 
 # 장애 재현용 — 기본은 정상 가동 조합
 # OOM/CPU/Deadlock 실험 시 실험_절차서.md 의 조합표대로 export 후 재실행
+#   CPU_MAX_OCCUPY=10 이어야 [Healthy System Monitoring] 이 선택된다(실측).
+#   95 는 정상 가동이 아니라 CPU 과점유 시나리오라 34초 만에 종료된다.
 export MEMORY_LIMIT="512"
-export CPU_MAX_OCCUPY="95"
+export CPU_MAX_OCCUPY="10"
 export MULTI_THREAD_ENABLE="false"
 EOF
 else

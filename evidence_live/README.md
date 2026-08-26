@@ -5,8 +5,10 @@
 ([src/experiments/lib_experiment.sh](../src/experiments/lib_experiment.sh) 의 `DEFAULT_EVIDENCE`).
 
 ## 왜 `evidence/` 와 분리돼 있나
-- [`../evidence/`](../evidence) : 리포트([reports/*.md](../reports))가 1:1로 인용하는 **큐레이션된 제출본**.
-  PID·타임스탬프·수치가 리포트 본문·`docs/html` 과 일치해야 하므로 **덮어쓰지 않는다.**
+- [`../evidence/`](../evidence) : 리포트([reports/*.md](../reports))가 1:1로 인용하는 **제출본 실측 증거**.
+  2026-08-26 실행분이며 파일 맨 위에 수집 명령·시각·환경변수 헤더가 붙어 있다.
+  PID·타임스탬프·수치가 리포트 본문과 일치해야 하므로 **실수로 덮어쓰지 않는다**
+  (갱신할 때는 `EVIDENCE_DIR="$REPO/evidence"` 를 명시하고, 헤더 주석도 함께 갱신한다).
 - `evidence_live/` : 재실행 결과가 쌓이는 곳. 매 실행마다 값(PID·시각·%)이 달라지는 게 정상이며,
   `evidence/` 와 **패턴·비율을 비교(검증)** 하는 용도로 쓴다.
 

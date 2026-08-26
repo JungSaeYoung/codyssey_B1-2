@@ -44,6 +44,13 @@ if [[ -z "${APP_PID}" ]]; then
     echo "[ERROR] Application process not running."
     exit 1
 fi
+# PyInstaller onefile 바이너리는 "부트로더(부모)" 가 압축을 풀고 "실제 앱(자식)" 을 fork 한다.
+# 부모는 2MB 안팎의 스텁이라 여기서 RSS/CPU 를 읽으면 워크로드가 전혀 보이지 않는다
+# (실측: 부모 RSS 2.1MB 고정 / 자식 RSS 18MB→300MB). 같은 이름의 자식이 있으면
+# 그쪽을 관측 대상 PID 로 삼는다 — 앱이 스스로 남기는 "Self-terminating process N" 의 N 과도 일치한다.
+APP_CHILD="$(pgrep -P "${APP_PID}" -x "${APP_NAME}" 2>/dev/null | head -n1 || true)"
+[[ -n "${APP_CHILD}" ]] && APP_PID="${APP_CHILD}"
+
 echo "Checking process '${APP_NAME}'... [OK] (PID: ${APP_PID})"
 
 # 1-2) 포트 LISTEN 확인 (ss 사용, 미존재 시 netstat 폴백)
@@ -84,32 +91,51 @@ fi
 # ────────────────────────────────────────────────────────────────────────────
 # 3) 자원 수집
 # ────────────────────────────────────────────────────────────────────────────
+# ── (a) 시스템 전체 지표 (SYS_*) ───────────────────────────────────────────
 # CPU 사용률 (%) — top 1회 샘플링
-CPU_USAGE="$(top -bn1 | awk -F'[ ,]+' '/Cpu\(s\)/ {for(i=1;i<=NF;i++) if ($i ~ /id$/) {print 100 - $(i-1); exit}}')"
-[[ -z "${CPU_USAGE}" ]] && CPU_USAGE="0.0"
-CPU_USAGE="$(printf "%.1f" "${CPU_USAGE}")"
+SYS_CPU="$(top -bn1 | awk -F'[ ,]+' '/Cpu\(s\)/ {for(i=1;i<=NF;i++) if ($i ~ /id$/) {print 100 - $(i-1); exit}}')"
+[[ -z "${SYS_CPU}" ]] && SYS_CPU="0.0"
+SYS_CPU="$(printf "%.1f" "${SYS_CPU}")"
 
-# 메모리 사용률 (%)
-MEM_USAGE="$(free | awk '/^Mem:/ {printf "%.1f", $3/$2*100}')"
-[[ -z "${MEM_USAGE}" ]] && MEM_USAGE="0.0"
+# 메모리 사용률 (%) — free 는 "호스트 전체" 값이다. 대상 프로세스의 heap 증가는
+# 여기 거의 반영되지 않으므로(실측: 앱 heap 0→300MB 동안 35.5%→35.6%) 아래 PROC_* 와 반드시 함께 본다.
+SYS_MEM="$(free | awk '/^Mem:/ {printf "%.1f", $3/$2*100}')"
+[[ -z "${SYS_MEM}" ]] && SYS_MEM="0.0"
+
+# ── (b) 대상 프로세스 지표 (PROC_*) — B1-2-A1 / B1-2-A4 가 요구하는 "특정 프로세스" ──
+# PROC_RSS : 물리 메모리(Resident Set Size). ps 는 KB 로 주므로 MB 로 환산한다.
+# PROC_CPU : ps 의 %CPU 는 "프로세스 시작 이후 누적 평균" 이다. 1회성 cron 관제에서는
+#            순간값을 얻을 수단이 없어(top -bn1 도 첫 샘플은 동일하게 누적값) 누적 평균을 기록한다.
+# pgrep 직후 프로세스가 죽어 ps 가 빈 값을 주더라도 컬럼이 깨지지 않도록 기본값을 둔다.
+PROC_RSS_KB="$(ps -o rss= -p "${APP_PID}" 2>/dev/null | awk 'NR==1 {gsub(/[^0-9]/,""); print}')"
+[[ -z "${PROC_RSS_KB}" ]] && PROC_RSS_KB="0"
+PROC_RSS="$(awk -v k="${PROC_RSS_KB}" 'BEGIN {printf "%.1f", k/1024}')"
+
+PROC_CPU="$(ps -o pcpu= -p "${APP_PID}" 2>/dev/null | awk 'NR==1 {gsub(/[^0-9.]/,""); print}')"
+[[ -z "${PROC_CPU}" ]] && PROC_CPU="0.0"
+PROC_CPU="$(printf "%.1f" "${PROC_CPU}")"
 
 # 디스크 사용률 (root 파티션)
 DISK_USED="$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')"
 [[ -z "${DISK_USED}" ]] && DISK_USED="0"
 
 echo "[RESOURCE MONITORING]"
-printf "CPU Usage  : %s%%\n" "${CPU_USAGE}"
-printf "MEM Usage  : %s%%\n" "${MEM_USAGE}"
-printf "DISK Used  : %s%%\n" "${DISK_USED}"
+printf "SYS  CPU Usage : %s%%\n" "${SYS_CPU}"
+printf "SYS  MEM Usage : %s%%\n" "${SYS_MEM}"
+printf "PROC CPU (avg) : %s%%   (PID %s)\n" "${PROC_CPU}" "${APP_PID}"
+printf "PROC RSS       : %s MB (PID %s)\n" "${PROC_RSS}" "${APP_PID}"
+printf "DISK Used      : %s%%\n" "${DISK_USED}"
 echo ""
 
 # ────────────────────────────────────────────────────────────────────────────
 # 4) 임계값 경고
 # ────────────────────────────────────────────────────────────────────────────
-awk -v v="${CPU_USAGE}" -v t="${CPU_THRESHOLD}" 'BEGIN {exit !(v+0 > t+0)}' \
-    && echo "[WARNING] CPU threshold exceeded (${CPU_USAGE}% > ${CPU_THRESHOLD}%)"
-awk -v v="${MEM_USAGE}" -v t="${MEM_THRESHOLD}" 'BEGIN {exit !(v+0 > t+0)}' \
-    && echo "[WARNING] MEM threshold exceeded (${MEM_USAGE}% > ${MEM_THRESHOLD}%)"
+awk -v v="${SYS_CPU}" -v t="${CPU_THRESHOLD}" 'BEGIN {exit !(v+0 > t+0)}' \
+    && echo "[WARNING] SYS CPU threshold exceeded (${SYS_CPU}% > ${CPU_THRESHOLD}%)"
+awk -v v="${SYS_MEM}" -v t="${MEM_THRESHOLD}" 'BEGIN {exit !(v+0 > t+0)}' \
+    && echo "[WARNING] SYS MEM threshold exceeded (${SYS_MEM}% > ${MEM_THRESHOLD}%)"
+awk -v v="${PROC_CPU}" -v t="${CPU_THRESHOLD}" 'BEGIN {exit !(v+0 > t+0)}' \
+    && echo "[WARNING] PROC CPU threshold exceeded (${PROC_CPU}% > ${CPU_THRESHOLD}%, PID ${APP_PID})"
 awk -v v="${DISK_USED}"  -v t="${DISK_THRESHOLD}" 'BEGIN {exit !(v+0 > t+0)}' \
     && echo "[WARNING] DISK threshold exceeded (${DISK_USED}% > ${DISK_THRESHOLD}%)"
 
@@ -125,7 +151,10 @@ if [[ ! -w "${LOG_DIR}" ]]; then
     exit 1
 fi
 
-LOG_LINE="[${TS}] PID:${APP_PID} CPU:${CPU_USAGE}% MEM:${MEM_USAGE}% DISK_USED:${DISK_USED}%"
+# 컬럼 이름으로 시스템(SYS_*) / 대상 프로세스(PROC_*) 를 구분한다.
+#   예) [2026-08-26 08:20:01] PID:2673158 SYS_CPU:6.2% SYS_MEM:35.6% PROC_CPU:2.0% PROC_RSS:18.1MB DISK_USED:9%
+# (파서: src/report.sh, verify_orbstack.sh v_monitor, src/experiments/lib_experiment.sh _sample_to)
+LOG_LINE="[${TS}] PID:${APP_PID} SYS_CPU:${SYS_CPU}% SYS_MEM:${SYS_MEM}% PROC_CPU:${PROC_CPU}% PROC_RSS:${PROC_RSS}MB DISK_USED:${DISK_USED}%"
 echo "${LOG_LINE}" >> "${LOG_FILE}"
 echo ""
 echo "[INFO] Log appended: ${LOG_FILE}"

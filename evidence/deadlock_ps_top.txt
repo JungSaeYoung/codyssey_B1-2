@@ -1,31 +1,226 @@
-# Deadlock 실험 — ps / top 캡처 (Before, 무응답 진입 후 30분 시점)
+# =============================================================================
+# Deadlock 케이스 — ps / top -H / ps -L 스냅샷  [B1-2-E-DL1 / E-DL2 / E-DL4 / A7 / A8 / A9]
+# =============================================================================
+#   ※ 이 파일은 위 환경에서 실제로 실행해 받은 산출물이다. 과제 PDF 예시가 아니다.
+#   수집 시각: 2026-08-26 09:14:07 · 09:17:19 (§1) / 09:24:53 ~ 09:28:00 (§2) (KST)
+#   호스트   : devjsy / Ubuntu 24.04.4 LTS / Linux 6.8.0-138-generic x86_64 / 16 vCPU / 62 GiB RAM / CLK_TCK=100
+#   실행 계정: ashofrondol (uid=1000) — root 아님 (B1-2-P1 충족)
+#   바이너리 : $AGENT_HOME/agent-leak-app  (md5 0fb02e12554328b32e6e1adac861630e, repo bin/ 과 동일)
+#
+#   사전 환경변수:
+#   export AGENT_HOME=/home/ashofrondol/b12_sandbox/agent-app
+#   export AGENT_PORT=15034
+#   export AGENT_UPLOAD_DIR="$AGENT_HOME/upload_files"
+#   export AGENT_KEY_PATH="$AGENT_HOME/api_keys"      # secret.key = "agent_api_key_test"
+#   export AGENT_LOG_DIR=/home/ashofrondol/b12_sandbox/logs
+#   실험 환경변수: Before: MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=true / After: MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=false
+#
+#   수집 명령:
+#   cd $REPO && EVIDENCE_DIR="$PWD/evidence" SAMPLE_INTERVAL=3 FREEZE_SECS=60 DEADLOCK_TIMEOUT=300 \
+#     DEADLOCK_AFTER_VERIFY=180 bash src/experiments/00_run_experiments.sh deadlock      # §1
+#   
+#   # §2 는 '변화 없음' 을 시간축으로 못박기 위해 같은 Before 조합으로 한 번 더 띄워
+#   #    30초 / 120초 / 210초 세 시점에 같은 명령을 반복한 보강 캡처다:
+#   cd $AGENT_HOME && nohup ./agent-leak-app > /dev/null 2>&1 &   # MULTI_THREAD_ENABLE=true
+#   PID=$(pgrep -x agent-leak-app | tail -n1)
+#   ps -ef | grep '[a]gent-leak-app'
+#   ps -L -p $PID -o lwp,pcpu,stat,wchan:20,time,cmd
+#   top -H -bn1 -p $PID | tail -5
+#   grep -E '^(Threads|VmRSS|voluntary|nonvoluntary)' /proc/$PID/status
+#   stat -c '%s bytes, mtime=%y' $AGENT_LOG_DIR/agent_app.log
+#
+#   §1 이 담고 있는 Before/After 대조 (같은 명령, 같은 포맷):
+#     Before 09:14:07  ps -L → 스레드 3개 전부 WCHAN=futex_wait_queue, %CPU 0.0
+#                      top -H → TIME+ 0:00.04 / 0:00.00 / 0:00.00,  RES 18080 kB
+#     After  09:17:19  ps -L → futex_wait_queue 1개(메인=조인 대기) + do_select 2개(워커 정상 동작)
+#                      top -H → TIME+ 0:00.05 / 0:00.79 / 0:00.47,  RES 453564 kB (증가 중)
+#     → '전 스레드 futex_wait_queue + TIME+ 정지' 가 데드락의 판별 신호다.
+#   
+#   curl 은 판별력이 없다 — 정상(Healthy) 모드에서도 15034 는 LISTEN 만 하고 HTTP 응답을 주지
+#     않는다(두 구간 모두 'Operation timed out … with 0 bytes received'). 증거로는 남기되
+#     데드락 판정 근거로는 쓰지 않는다.
+# =============================================================================
 
-##### 18:30:12  ps -ef | grep -v grep | grep agent #####
-agent-admin 15021  2210  0 18:00 pts/1    00:00:01 /usr/bin/python3 ./agent-leak-app
-# → PID 15021 살아있음 (etime=30분)
 
-##### 18:30:12  ps -p 15021 -o pid,stat,etime,cmd #####
-   PID STAT     ELAPSED CMD
- 15021 Sl         30:12 /usr/bin/python3 ./agent-leak-app
-# STAT 'Sl' = Sleeping + multi-thread → 종료된 게 아니라 모든 스레드가 잠듦
+#-----------------------------------------------------------------------------
+# §1. 실험 파이프라인 스냅샷 — Before(freeze 감지 시점) / After(정상 가동)
+#-----------------------------------------------------------------------------
 
-##### 18:30:12  top -H -bn1 -p 15021 #####
-  PID USER       PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
-15021 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:01.20 python3
-15022 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:00.18 Worker-A
-15023 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:00.17 Worker-B
-15024 agent-admin 20  0   285M    48M  5.1M S   0.0   2.4   0:00.04 Watchdog
-# 모든 스레드 %CPU=0.0 — TIME+ 누적이 멈춤
+##### 09:14:07  ps -ef | grep -v grep | grep agent #####
+ashofro+   10992       1  0 Aug23 ?        00:00:05 /home/ashofrondol/.vscode-server/code-110a328ea54b42367b803ec53ee0bf52ef26b419 --cli-data-dir /home/ashofrondol/.vscode-server/cli agent host
+ashofro+ 2468610       1  0 04:27 ?        00:00:00 sh /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/bin/code-server --connection-token=remotessh --accept-server-license-terms --reconnection-grace-time=28800 --agent-host-bridge-port=42373 --agent-host-bridge-host=127.0.0.1 --agent-host-bridge-connection-token=90b7a71b-4267-4ee4-91ee-21a4023910a6 --start-server --enable-remote-auto-shutdown --socket-path=/tmp/code-16a68bce-65a1-4d34-ac2c-9a41c117619a
+ashofro+ 2468614 2468610  0 04:27 ?        00:01:42 /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/node /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/out/server-main.js --connection-token=remotessh --accept-server-license-terms --reconnection-grace-time=28800 --agent-host-bridge-port=42373 --agent-host-bridge-host=127.0.0.1 --agent-host-bridge-connection-token=90b7a71b-4267-4ee4-91ee-21a4023910a6 --start-server --enable-remote-auto-shutdown --socket-path=/tmp/code-16a68bce-65a1-4d34-ac2c-9a41c117619a
+ashofro+ 2468641   10992  0 04:27 ?        00:00:00 sh /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/bin/code-server --socket-path /tmp/code-b39bfac6-442c-49f5-9299-f7d0a3a5efb4 --agent-host-path /tmp/code-3bf8a2b8-61ab-495f-8da8-0f154e558908 --start-server --accept-server-license-terms --enable-remote-auto-shutdown --without-connection-token
+ashofro+ 2468646 2468641  0 04:27 ?        00:00:00 /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/node /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/out/server-main.js --socket-path /tmp/code-b39bfac6-442c-49f5-9299-f7d0a3a5efb4 --agent-host-path /tmp/code-3bf8a2b8-61ab-495f-8da8-0f154e558908 --start-server --accept-server-license-terms --enable-remote-auto-shutdown --without-connection-token
+ashofro+ 2468753 2468646  0 04:27 ?        00:00:08 /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/node /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/out/bootstrap-fork --type=agentHost --logsPath /home/ashofrondol/.vscode-server/data/logs/20260826T042747 --user-data-dir /home/ashofrondol/.vscode-server/data --telemetry-level all
+ashofro+ 2756204       1  0 09:12 ?        00:00:00 ./agent-leak-app
+ashofro+ 2756210 2756204  0 09:12 ?        00:00:00 ./agent-leak-app
 
-##### 18:30:12  ps -L -p 15021 -o lwp,pcpu,stat,wchan:25,cmd #####
-   LWP %CPU STAT WCHAN                     CMD
- 15021  0.0 Sl   futex_wait_queue_me       python3
- 15022  0.0 Sl   futex_wait_queue_me       python3   ← Worker-A: futex 락 대기
- 15023  0.0 Sl   futex_wait_queue_me       python3   ← Worker-B: futex 락 대기
- 15024  0.0 Sl   poll_schedule_timeout     python3   ← Watchdog: 주기적 깨어남
-# WCHAN(Wait Channel) = 커널이 대기시킨 함수명.
-#   futex_wait_queue_me → 사용자 공간 뮤텍스(락) 대기 중.
+##### ps -p 2756210 -o pid,stat,etime,cmd #####
+    PID STAT     ELAPSED CMD
+2756210 SNl        01:16 ./agent-leak-app
 
-##### 18:30:12  curl --max-time 3 http://0.0.0.0:15034 #####
-curl: (28) Operation timed out after 3000 milliseconds with 0 bytes received
-# → 외부에서 봐도 무응답 (TCP accept 루프도 멈춰있음)
+##### top -H -bn1 -p 2756210 #####
+top - 09:14:07 up 3 days, 16:24,  4 users,  load average: 0.17, 0.27, 0.56
+Threads:   3 total,   0 running,   3 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  1.2 us,  0.0 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15183.7 free,  23864.6 used,  25371.4 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39813.3 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2756210 ashofro+  30  10  171572  18080   9696 S   0.0   0.0   0:00.04 agent-l+
+2756386 ashofro+  30  10  171572  18080   9696 S   0.0   0.0   0:00.00 agent-l+
+2756387 ashofro+  30  10  171572  18080   9696 S   0.0   0.0   0:00.00 agent-l+
+
+##### ps -L -p 2756210 -o lwp,pcpu,stat,wchan:25,cmd #####
+    LWP %CPU STAT WCHAN                     CMD
+2756210  0.0 SNl  futex_wait_queue          ./agent-leak-app
+2756386  0.0 SNl  futex_wait_queue          ./agent-leak-app
+2756387  0.0 SNl  futex_wait_queue          ./agent-leak-app
+
+##### curl --max-time 3 http://127.0.0.1:15034 #####
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 127.0.0.1:15034...
+* Connected to 127.0.0.1 (127.0.0.1) port 15034
+> GET / HTTP/1.1
+> Host: 127.0.0.1:15034
+> User-Agent: curl/8.5.0
+> Accept: */*
+
+##### 09:17:19  ps -ef | grep -v grep | grep agent #####
+ashofro+   10992       1  0 Aug23 ?        00:00:05 /home/ashofrondol/.vscode-server/code-110a328ea54b42367b803ec53ee0bf52ef26b419 --cli-data-dir /home/ashofrondol/.vscode-server/cli agent host
+ashofro+ 2468610       1  0 04:27 ?        00:00:00 sh /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/bin/code-server --connection-token=remotessh --accept-server-license-terms --reconnection-grace-time=28800 --agent-host-bridge-port=42373 --agent-host-bridge-host=127.0.0.1 --agent-host-bridge-connection-token=90b7a71b-4267-4ee4-91ee-21a4023910a6 --start-server --enable-remote-auto-shutdown --socket-path=/tmp/code-16a68bce-65a1-4d34-ac2c-9a41c117619a
+ashofro+ 2468614 2468610  0 04:27 ?        00:01:43 /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/node /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/out/server-main.js --connection-token=remotessh --accept-server-license-terms --reconnection-grace-time=28800 --agent-host-bridge-port=42373 --agent-host-bridge-host=127.0.0.1 --agent-host-bridge-connection-token=90b7a71b-4267-4ee4-91ee-21a4023910a6 --start-server --enable-remote-auto-shutdown --socket-path=/tmp/code-16a68bce-65a1-4d34-ac2c-9a41c117619a
+ashofro+ 2468641   10992  0 04:27 ?        00:00:00 sh /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/bin/code-server --socket-path /tmp/code-b39bfac6-442c-49f5-9299-f7d0a3a5efb4 --agent-host-path /tmp/code-3bf8a2b8-61ab-495f-8da8-0f154e558908 --start-server --accept-server-license-terms --enable-remote-auto-shutdown --without-connection-token
+ashofro+ 2468646 2468641  0 04:27 ?        00:00:00 /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/node /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/out/server-main.js --socket-path /tmp/code-b39bfac6-442c-49f5-9299-f7d0a3a5efb4 --agent-host-path /tmp/code-3bf8a2b8-61ab-495f-8da8-0f154e558908 --start-server --accept-server-license-terms --enable-remote-auto-shutdown --without-connection-token
+ashofro+ 2468753 2468646  0 04:27 ?        00:00:08 /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/node /home/ashofrondol/.vscode-server/cli/servers/Stable-110a328ea54b42367b803ec53ee0bf52ef26b419/server/out/bootstrap-fork --type=agentHost --logsPath /home/ashofrondol/.vscode-server/data/logs/20260826T042747 --user-data-dir /home/ashofrondol/.vscode-server/data --telemetry-level all
+ashofro+ 2758654       1  0 09:14 ?        00:00:00 ./agent-leak-app
+ashofro+ 2758660 2758654  0 09:14 ?        00:00:01 ./agent-leak-app
+
+##### ps -p 2758660 -o pid,stat,etime,cmd #####
+    PID STAT     ELAPSED CMD
+2758660 SNl        03:04 ./agent-leak-app
+
+##### top -H -bn1 -p 2758660 #####
+top - 09:17:19 up 3 days, 16:27,  4 users,  load average: 0.33, 0.31, 0.52
+Threads:   3 total,   0 running,   3 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  1.2 us,  1.2 sy,  0.0 ni, 97.0 id,  0.0 wa,  0.0 hi,  0.6 si,  0.0 st 
+MiB Mem :  63677.9 total,  14458.9 free,  24588.1 used,  25372.8 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39089.8 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2758660 ashofro+  30  10  695860 453564   9792 S   0.0   0.7   0:00.05 agent-l+
+2758757 ashofro+  30  10  695860 453564   9792 S   0.0   0.7   0:00.79 agent-l+
+2758758 ashofro+  30  10  695860 453564   9792 S   0.0   0.7   0:00.47 agent-l+
+
+##### ps -L -p 2758660 -o lwp,pcpu,stat,wchan:25,cmd #####
+    LWP %CPU STAT WCHAN                     CMD
+2758660  0.0 SNl  futex_wait_queue          ./agent-leak-app
+2758757  0.4 SNl  do_select                 ./agent-leak-app
+2758758  0.2 SNl  do_select                 ./agent-leak-app
+
+##### curl --max-time 3 http://127.0.0.1:15034 #####
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0*   Trying 127.0.0.1:15034...
+* Connected to 127.0.0.1 (127.0.0.1) port 15034
+> GET / HTTP/1.1
+> Host: 127.0.0.1:15034
+> User-Agent: curl/8.5.0
+> Accept: */*
+
+#-----------------------------------------------------------------------------
+# §2. 보강 캡처 — 동일 지표를 30s / 120s / 210s 세 시점에서 반복 (별도 실행)
+#-----------------------------------------------------------------------------
+
+# (참고) 아래 'ps -ef | grep [a]gent-leak-app' 출력에서, 수집 스크립트 자신의 커맨드라인이
+#        문자열 매칭에 걸려 함께 잡히던 /bin/bash -c … 줄은 가독성을 위해 제거했다.
+#        agent-leak-app 프로세스 줄(부모 스텁 + 자식 워커)은 원문 그대로다.
+
+##### t≈30s  2026-08-26 09:24:53 #####
+$ ps -ef | grep '[a]gent-leak-app'
+ashofro+ 2774057 2774055  0 09:24 ?        00:00:00 ./agent-leak-app
+ashofro+ 2774062 2774057  0 09:24 ?        00:00:00 ./agent-leak-app
+$ ps -L -p 2774062 -o lwp,pcpu,stat,wchan:20,time,cmd
+    LWP %CPU STAT WCHAN                    TIME CMD
+2774062  0.1 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2774166  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2774167  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+$ top -H -bn1 -p 2774062 | tail -5
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2774062 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.04 agent-l+
+2774166 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.00 agent-l+
+2774167 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.00 agent-l+
+$ cat /proc/2774062/status | grep -E '^(Threads|VmRSS|voluntary|nonvoluntary)'
+VmRSS:	   18148 kB
+Threads:	3
+voluntary_ctxt_switches:	14
+nonvoluntary_ctxt_switches:	0
+$ stat -c '%s bytes, mtime=%y' $AGENT_LOG_DIR/agent_app.log
+1517 bytes, mtime=2026-08-26 09:24:32.637860249 +0900
+$ tail -2 $AGENT_LOG_DIR/agent_app.log
+2026-08-26 09:24:32,638 [INFO] [AgentWorker][Worker-Thread-1] WAITING for [Socket_Pool_B]... (Status: BLOCKED)
+2026-08-26 09:24:32,638 [INFO] [AgentWorker][Worker-Thread-2] WAITING for [Shared_Memory_A]... (Status: BLOCKED)
+
+##### t≈120s  2026-08-26 09:26:23 #####
+$ ps -ef | grep '[a]gent-leak-app'
+ashofro+ 2774057 2774055  0 09:24 ?        00:00:00 ./agent-leak-app
+ashofro+ 2774062 2774057  0 09:24 ?        00:00:00 ./agent-leak-app
+$ ps -L -p 2774062 -o lwp,pcpu,stat,wchan:20,time,cmd
+    LWP %CPU STAT WCHAN                    TIME CMD
+2774062  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2774166  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2774167  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+$ top -H -bn1 -p 2774062 | tail -5
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2774062 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.04 agent-l+
+2774166 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.00 agent-l+
+2774167 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.00 agent-l+
+$ cat /proc/2774062/status | grep -E '^(Threads|VmRSS|voluntary|nonvoluntary)'
+VmRSS:	   18148 kB
+Threads:	3
+voluntary_ctxt_switches:	14
+nonvoluntary_ctxt_switches:	0
+$ stat -c '%s bytes, mtime=%y' $AGENT_LOG_DIR/agent_app.log
+1517 bytes, mtime=2026-08-26 09:24:32.637860249 +0900
+$ tail -2 $AGENT_LOG_DIR/agent_app.log
+2026-08-26 09:24:32,638 [INFO] [AgentWorker][Worker-Thread-1] WAITING for [Socket_Pool_B]... (Status: BLOCKED)
+2026-08-26 09:24:32,638 [INFO] [AgentWorker][Worker-Thread-2] WAITING for [Shared_Memory_A]... (Status: BLOCKED)
+
+##### t≈210s  2026-08-26 09:27:54 #####
+$ ps -ef | grep '[a]gent-leak-app'
+ashofro+ 2774057 2774055  0 09:24 ?        00:00:00 ./agent-leak-app
+ashofro+ 2774062 2774057  0 09:24 ?        00:00:00 ./agent-leak-app
+$ ps -L -p 2774062 -o lwp,pcpu,stat,wchan:20,time,cmd
+    LWP %CPU STAT WCHAN                    TIME CMD
+2774062  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2774166  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+2774167  0.0 SNl  futex_wait_queue     00:00:00 ./agent-leak-app
+$ top -H -bn1 -p 2774062 | tail -5
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2774062 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.04 agent-l+
+2774166 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.00 agent-l+
+2774167 ashofro+  30  10  171572  18148   9760 S   0.0   0.0   0:00.00 agent-l+
+$ cat /proc/2774062/status | grep -E '^(Threads|VmRSS|voluntary|nonvoluntary)'
+VmRSS:	   18148 kB
+Threads:	3
+voluntary_ctxt_switches:	14
+nonvoluntary_ctxt_switches:	0
+$ stat -c '%s bytes, mtime=%y' $AGENT_LOG_DIR/agent_app.log
+1517 bytes, mtime=2026-08-26 09:24:32.637860249 +0900
+$ tail -2 $AGENT_LOG_DIR/agent_app.log
+2026-08-26 09:24:32,638 [INFO] [AgentWorker][Worker-Thread-1] WAITING for [Socket_Pool_B]... (Status: BLOCKED)
+2026-08-26 09:24:32,638 [INFO] [AgentWorker][Worker-Thread-2] WAITING for [Shared_Memory_A]... (Status: BLOCKED)
+
+##### 210초 경과 후에도 PID 생존 — 종료되지 않음 (자가 복구 없음) #####
+$ kill -0 2774062 && echo ALIVE
+ALIVE
+$ kill 2774062   # 관측 종료 — 수동 SIGTERM
+$ pgrep -x agent-leak-app | wc -l
+0

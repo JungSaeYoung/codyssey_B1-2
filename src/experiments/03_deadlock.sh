@@ -3,7 +3,8 @@
 # -----------------------------------------------------------------------------
 # 실험_절차서.md §3 에 대응.
 #   Before  MULTI_THREAD_ENABLE=true   → PID 는 살아있지만 로그/리소스 정지(freeze) 관측
-#   After   MULTI_THREAD_ENABLE=false  → 정상 가동(freeze 없음 + curl 응답) 회피 검증
+#   After   MULTI_THREAD_ENABLE=false  → 정상 가동(freeze 없음 + PID 생존) 회피 검증
+#           (MEMORY_LIMIT=512 / CPU_MAX_OCCUPY=10 은 양쪽 고정 — 다른 시나리오가 끼어들지 않게)
 #   증거    deadlock_monitor.log / deadlock_app.log / deadlock_ps_top.txt
 #           (절차서 3-2 의 6종 증거: ps -ef / ps stat / top -H / ps -L wchan / curl / app 로그)
 #
@@ -25,12 +26,15 @@ experiment_deadlock() {
 
     # ===== Before: MULTI_THREAD_ENABLE=true =====
     banner "Deadlock 실험 — Before (MULTI_THREAD_ENABLE=true)"
-    step "환경: export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=95 MULTI_THREAD_ENABLE=true"
-    export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=95 MULTI_THREAD_ENABLE=true
+    # [고침] CPU_MAX_OCCUPY 95 → 10. 실측상 CPU_MAX_OCCUPY>50 이면 CpuWorker 가 34초 안에
+    #   프로세스를 죽여 버려서(exit 143) freeze 를 관측할 시간 자체가 없다.
+    #   MULTI_THREAD_ENABLE=true 의 순수 효과만 보려면 나머지 두 값은 안전 구간에 둔다.
+    step "환경: export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=true"
+    export MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=true
     _kill_leftovers
     printf '# ── Deadlock Before (MULTI_THREAD_ENABLE=true) start %s ──\n' "$(date '+%F %T')" >> "$MON"
 
-    local pid; pid="$(launch_app "$APP_LOG")"; CURRENT_PID="$pid"
+    local pid; pid="$(launch_app "$APP_STDOUT")"; CURRENT_PID="$pid"
     pid="$(_confirm_pid "$pid")"; CURRENT_PID="$pid"
     step "PID=${pid} 무응답(freeze) 대기 (최대 $(fmt "$DEADLOCK_TIMEOUT"), $(fmt "$FREEZE_SECS") 무변화 시 freeze)"
 
@@ -60,11 +64,11 @@ experiment_deadlock() {
     if [[ "$RUN_AFTER" == "1" ]]; then
         banner "Deadlock 실험 — After (MULTI_THREAD_ENABLE=false)"
         step "정상 가동 검증 ($(fmt "$DEADLOCK_AFTER_VERIFY") 동안 freeze 없음 + curl 응답 확인)"
-        export MULTI_THREAD_ENABLE=false MEMORY_LIMIT=512 CPU_MAX_OCCUPY=95
+        export MULTI_THREAD_ENABLE=false MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10
         _kill_leftovers
         printf '# ── Deadlock After (MULTI_THREAD_ENABLE=false) start %s ──\n' "$(date '+%F %T')" >> "$MON"
 
-        pid="$(launch_app "$APP_LOG")"; CURRENT_PID="$pid"
+        pid="$(launch_app "$APP_STDOUT")"; CURRENT_PID="$pid"
         pid="$(_confirm_pid "$pid")"; CURRENT_PID="$pid"
         _watch_freeze "$pid" "$DEADLOCK_AFTER_VERIFY" "$MON"
         local arc=$?       # 0=froze(나쁨) 1=died(나쁨) 2=freeze없음(좋음)
@@ -90,10 +94,15 @@ experiment_deadlock() {
     if [[ "$before_ok" == "yes" ]]; then
         if [[ "$RUN_AFTER" != "1" ]]; then
             verdict="PASS"; detail="freeze+PID생존+curl=${before_curl} (wchan futex=${wchan_hit}, After 생략)"
-        elif [[ "$after_frozen" == "no" && ( "$after_curl" == "OK" || "$after_curl" == "N/A" ) ]]; then
-            verdict="PASS"; detail="Before 데드락 / After 정상(curl=${after_curl}), wchan futex=${wchan_hit}"
+        elif [[ "$after_frozen" == "no" && "$after_alive" == "yes" ]]; then
+            # [고침] 예전엔 After PASS 조건에 curl=OK 를 요구했다. 실측 결과 이 앱은
+            #   정상(Healthy) 모드에서도 15034 를 LISTEN 만 하고 HTTP 응답을 주지 않아
+            #   (curl --max-time 5 → "Operation timed out … with 0 bytes received")
+            #   curl 은 데드락/정상을 가르지 못한다. 판별은 "로그가 계속 전진하는가(freeze 없음)"
+            #   + "PID 생존" 으로 한다. curl 결과는 증거로 남기되 게이트에서는 뺀다.
+            verdict="PASS"; detail="Before 데드락 / After 정상(로그 전진, PID 생존; curl=${after_curl} 은 판별력 없음), wchan futex=${wchan_hit}"
         else
-            verdict="FAIL"; detail="After 회피 미확인 (frozen=${after_frozen}, curl=${after_curl})"
+            verdict="FAIL"; detail="After 회피 미확인 (frozen=${after_frozen}, alive=${after_alive})"
         fi
     else
         detail="Before 데드락 시그니처 불충분 (rc=${rc}, alive=${alive_before}, curl=${before_curl})"

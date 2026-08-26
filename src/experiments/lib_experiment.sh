@@ -33,11 +33,16 @@ APP_BIN="${APP_BIN:-agent-leak-app}"
 AGENT_HOME="${AGENT_HOME:-}"                       # 필수 — agent-admin 로그인 셸 env
 AGENT_PORT="${AGENT_PORT:-15034}"
 AGENT_LOG_DIR="${AGENT_LOG_DIR:-/var/log/agent-app}"
-APP_LOG="${APP_LOG:-${AGENT_LOG_DIR}/agent-leak-app.log}"
+# 앱이 스스로 쓰는 로그 파일명은 agent_app.log 다 (직접 실행해 확인).
+#   $AGENT_LOG_DIR/agent_app.log  ← 앱 내부 logging(FileHandler) 이 append 모드로 기록
+#   $AGENT_LOG_DIR/agent_app.out  ← nohup 리다이렉트(부트 시퀀스 [1/6]~[6/6] + READY 배너)
+# 두 파일을 같은 경로로 두면 offset 이 다른 writer 2개가 한 파일을 덮어쓰므로 분리한다.
+APP_LOG="${APP_LOG:-${AGENT_LOG_DIR}/agent_app.log}"
+APP_STDOUT="${APP_STDOUT:-${AGENT_LOG_DIR}/agent_app.out}"
 
 LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # lib 은 src/experiments/ 에 있으므로 저장소 루트는 두 단계 위(../..).
-# 기본 출력은 evidence_live/ (저장소 evidence/ 의 예시 파일 보존). 직접 쓰려면 EVIDENCE_DIR 지정.
+# 기본 출력은 evidence_live/ (제출본 evidence/ 를 실수로 덮지 않도록). 갱신하려면 EVIDENCE_DIR 지정.
 REPO_ROOT="$(cd "${LIB_DIR}/../.." 2>/dev/null && pwd)"
 DEFAULT_EVIDENCE="${REPO_ROOT:-${LIB_DIR}/../..}/evidence_live"   # 폴백도 스크립트 위치 기준(CWD 비의존)
 EVIDENCE_DIR="${EVIDENCE_DIR:-${DEFAULT_EVIDENCE}}"
@@ -110,12 +115,31 @@ _metric_disk() {                                   # root 파티션 사용률(%)
     printf '%s' "$d"
 }
 
+# ── 대상 프로세스 지표 (monitor.sh §3-(b) 와 같은 계산식) ────────────────────
+# 시스템 전체(_metric_cpu/_metric_mem)로는 B1-2-A1(프로세스 메모리 증가)·A4(특정 프로세스
+# CPU 급상승)를 관측할 수 없다. RSS/%CPU 는 반드시 PID 를 지정해 읽는다.
+_metric_proc_rss() {                               # 대상 프로세스 RSS(MB)
+    local pid="$1" kb
+    kb="$(ps -o rss= -p "$pid" 2>/dev/null | awk 'NR==1 {gsub(/[^0-9]/,""); print}')"
+    [[ -z "$kb" ]] && kb="0"                       # 방금 죽었으면 0.0 (컬럼 유지)
+    awk -v k="$kb" 'BEGIN {printf "%.1f", k/1024}'
+}
+_metric_proc_cpu() {                               # 대상 프로세스 %CPU (시작 이후 누적 평균)
+    local pid="$1" c
+    c="$(ps -o pcpu= -p "$pid" 2>/dev/null | awk 'NR==1 {gsub(/[^0-9.]/,""); print}')"
+    [[ -z "$c" ]] && c="0.0"
+    printf '%.1f' "$c"
+}
+
 # monitor.log 와 동일한 한 줄 포맷으로 샘플 1개를 파일+화면에 남긴다
+# 포맷: [TS] PID:n SYS_CPU:x% SYS_MEM:y% PROC_CPU:z% PROC_RSS:wMB DISK_USED:d%
 _sample_to() {
     local pid="$1" file="$2"
-    printf '[%s] PID:%s CPU:%s%% MEM:%s%% DISK_USED:%s%%\n' \
+    printf '[%s] PID:%s SYS_CPU:%s%% SYS_MEM:%s%% PROC_CPU:%s%% PROC_RSS:%sMB DISK_USED:%s%%\n' \
         "$(date '+%Y-%m-%d %H:%M:%S')" "$pid" \
-        "$(_metric_cpu)" "$(_metric_mem)" "$(_metric_disk)" \
+        "$(_metric_cpu)" "$(_metric_mem)" \
+        "$(_metric_proc_cpu "$pid")" "$(_metric_proc_rss "$pid")" \
+        "$(_metric_disk)" \
         | tee -a "$file"
 }
 
@@ -125,22 +149,52 @@ _sample_to() {
 app_alive() { kill -0 "$1" 2>/dev/null; }
 
 # 실험_절차서대로: nohup ./agent-leak-app > log 2>&1 &
-# 주: ( cd && nohup ... & echo "$!" ) 는 AND-리스트 전체가 백그라운드 잡이 되므로 $! 는 서브셸 PID 다.
-#     실제 앱 PID 는 호출부에서 _confirm_pid 가 pgrep -f "$APP_BIN" 으로 보정한다.
+#
+# [고침] 이전 구현은  ( cd "$AGENT_HOME" && nohup ... & echo "$!" )  였다.
+#   `cd … && nohup …` 이 AND-리스트 전체로 하나의 백그라운드 잡이 되어 $! 가 "서브셸 PID" 였고,
+#   그 서브셸이 잠깐 살아 있으면 _confirm_pid 의 pgrep 보정도 지나쳐 엉뚱한 PID 가 반환됐다
+#   (→ 생존시간 0m00s, After 판정 FAIL).
+# 이제 cd 는 서브셸 안에서 동기적으로 실행하고 & 는 앱 한 줄에만 붙인다.
+#   → $! 는 앱의 실제 PID, cd 는 서브셸 안에만 머물러 호출부 cwd 를 오염시키지 않는다.
 launch_app() {
     local out="$1"
-    ( cd "$AGENT_HOME" && nohup "./${APP_BIN}" > "$out" 2>&1 & echo "$!" )
+    # 앱은 $APP_LOG 를 append 모드로 연다(직접 확인: 이전 내용이 그대로 남았다).
+    # 이전 실행의 종료 시그니처가 남아 있으면 다음 Before/After 관측이 즉시 오탐하므로 비운다.
+    : > "$APP_LOG" 2>/dev/null || true
+    (
+        cd "$AGENT_HOME" || exit 1
+        nohup "./${APP_BIN}" > "$out" 2>&1 &
+        echo "$!"
+    )
 }
 
-# $! 가 바로 죽었으면 pgrep 으로 실제 PID 보정 (인터프리터/데몬화 대비)
-_confirm_pid() {
-    local pid="$1" i
-    for i in 1 2 3; do
-        app_alive "$pid" && { echo "$pid"; return; }
+# PyInstaller onefile 은 부트로더(부모)가 실제 앱(자식)을 fork 한다.
+# heap 증가(RSS)·스레드(ps -L)·wchan 은 전부 자식 쪽에서만 보이고 부모는 2MB 스텁이다.
+# 앱이 남기는 "Self-terminating process N" 의 N 도 자식 PID 다 → 관측 대상을 자식으로 보정한다.
+# 자식이 아직 안 떴을 수 있어 최대 5초 기다리고, 끝내 없으면 원래 PID 를 그대로 쓴다.
+_worker_pid() {
+    local pid="$1" child i
+    for i in 1 2 3 4 5; do
+        child="$(pgrep -P "$pid" -x "$APP_BIN" 2>/dev/null | head -n1 || true)"
+        [[ -n "$child" ]] && { echo "$child"; return; }
+        app_alive "$pid" || break
         sleep 1
     done
-    local alt; alt="$(pgrep -f "$APP_BIN" 2>/dev/null | head -n1 || true)"
-    echo "${alt:-$pid}"
+    echo "$pid"
+}
+
+# $! 가 바로 죽었으면 pgrep 으로 실제 PID 보정 (인터프리터/데몬화 대비) 후 워커 PID 로 내려간다
+_confirm_pid() {
+    local pid="$1" i alt
+    for i in 1 2 3; do
+        app_alive "$pid" && break
+        sleep 1
+    done
+    if ! app_alive "$pid"; then
+        alt="$(pgrep -x "$APP_BIN" 2>/dev/null | head -n1 || true)"
+        [[ -n "$alt" ]] && pid="$alt"
+    fi
+    _worker_pid "$pid"
 }
 
 kill_app() {
@@ -156,9 +210,16 @@ kill_app() {
 }
 
 # 직전 실험의 잔존 프로세스 정리
+# [고침] pgrep -f 는 cmdline 전체를 보므로 "agent-leak-app" 문자열을 인자/경로에 달고 있는
+#   셸·툴링 프로세스까지 매칭해 실험 스크립트가 자기 자신(또는 감싼 셸)을 죽이는 사고가 난다
+#   (검증 중 실제로 재현: 검증 셸이 SIGTERM 으로 죽어 앱이 5초 만에 사라졌다).
+#   monitor.sh §1-1 과 동일하게 프로세스 이름(comm) 정확 일치(-x)만 잡는다.
 _kill_leftovers() {
     local p
-    for p in $(pgrep -f "$APP_BIN" 2>/dev/null || true); do kill_app "$p"; done
+    for p in $(pgrep -x "$APP_BIN" 2>/dev/null || true); do
+        [[ "$p" == "$$" ]] && continue
+        kill_app "$p"
+    done
 }
 
 _curl_probe() {                                    # OK / TIMEOUT
@@ -223,10 +284,19 @@ _snapshot_deadlock() {
     } >> "$file"
 }
 
-# 현재 APP_LOG 내용을 증거 app 로그에 Before/After 섹션으로 누적
+# 현재 실행의 앱 출력을 증거 app 로그에 Before/After 섹션으로 누적한다.
+#   - $APP_STDOUT : 부트 시퀀스([1/6]~[6/6] + Agent READY + Resource Check) — B1-2-P1~P11 증거
+#   - $APP_LOG    : 앱이 직접 쓰는 타임스탬프 로그 — 종료 직전/직후 라인(B1-2-E-OOM2 등) 증거
 _append_app_evidence() {
     local label="$1" file="$2"
-    { echo "### ===== ${label} ====="; cat "$APP_LOG" 2>/dev/null || true; echo; } >> "$file"
+    {
+        echo "### ===== ${label} ====="
+        echo "--- nohup stdout (${APP_STDOUT}) — 부트 시퀀스 ---"
+        cat "$APP_STDOUT" 2>/dev/null || true
+        echo "--- app log (${APP_LOG}) ---"
+        cat "$APP_LOG" 2>/dev/null || true
+        echo
+    } >> "$file"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -294,7 +364,7 @@ _terminating_experiment() {
     _kill_leftovers
     printf '# ── %s Before  (%s)  start %s ──\n' "$kind" "$before_env" "$(date '+%F %T')" >> "$MON"
 
-    local pid; pid="$(launch_app "$APP_LOG")"; CURRENT_PID="$pid"
+    local pid; pid="$(launch_app "$APP_STDOUT")"; CURRENT_PID="$pid"
     pid="$(_confirm_pid "$pid")"; CURRENT_PID="$pid"
     step "PID=${pid} → '${signature}' 시그니처 대기 (최대 $(fmt "$before_timeout"))"
 
@@ -323,7 +393,7 @@ _terminating_experiment() {
         _kill_leftovers
         printf '# ── %s After  (%s)  start %s ──\n' "$kind" "$after_env" "$(date '+%F %T')" >> "$MON"
 
-        pid="$(launch_app "$APP_LOG")"; CURRENT_PID="$pid"
+        pid="$(launch_app "$APP_STDOUT")"; CURRENT_PID="$pid"
         pid="$(_confirm_pid "$pid")"; CURRENT_PID="$pid"
 
         local after_cap
@@ -397,8 +467,13 @@ print_summary() {
     echo "  증거 디렉토리: ${EVIDENCE_DIR}/"
     ls -1 "$EVIDENCE_DIR" 2>/dev/null | sed 's/^/    - /' || true
     echo
-    echo "  (저장소 evidence/ 의 예시 파일은 건드리지 않았습니다. 제출용으로 쓰려면 위 파일을"
-    echo "   evidence/ 로 복사하거나 EVIDENCE_DIR=\"\$REPO/evidence\" 로 다시 실행하세요.)"
+    if [[ "${EVIDENCE_DIR}" == */evidence ]]; then
+        echo "  (제출용 evidence/ 를 직접 갱신했습니다. 각 파일 맨 위의 재현 헤더 주석은 이 스크립트가"
+        echo "   자동으로 붙이지 않으므로, 재수집 후에는 헤더의 시각·환경변수를 갱신하세요.)"
+    else
+        echo "  (여기는 재실행 산출물 폴더입니다. 제출용 evidence/ 를 갱신하려면"
+        echo "   EVIDENCE_DIR=\"\$REPO/evidence\" 로 다시 실행하세요.)"
+    fi
     echo
     echo "  다음 단계: 위 증거를 근거로 reports/0{1,2,3,4}_*.md 의 4단 구조(Description /"
     echo "             Evidence / Root Cause / Workaround) 를 채워 GitHub Issue 로 제출."
@@ -475,16 +550,25 @@ selftest() {
     DEADLOCK_TIMEOUT   = $(fmt "$DEADLOCK_TIMEOUT")  (FREEZE_SECS=$(fmt "$FREEZE_SECS"))
     RUN_AFTER          = ${RUN_AFTER}
     EVIDENCE_DIR       = ${EVIDENCE_DIR}
+    APP_LOG            = ${APP_LOG}      (앱이 직접 쓰는 로그)
+    APP_STDOUT         = ${APP_STDOUT}      (nohup 리다이렉트 = 부트 시퀀스)
 
   파이프라인별 환경변수 / 종료 시그니처 / 산출 증거:
     OOM (01)       MEMORY_LIMIT 256→512        자가종료 + 'self-terminat|limit exceeded'
+                   (CPU_MAX_OCCUPY=10 고정 — CpuWorker 가 대신 죽이는 교란 제거)
                    → oom_monitor.log, oom_app.log, oom_ps_top.txt
-    CPU (02)       CPU_MAX_OCCUPY 80→95        자가종료 + 'emergency abort|sigterm'
+    CPU (02)       CPU_MAX_OCCUPY 80→10        'cpu threshold violated|emergency abort|sigterm'
+                   (상향이 아니라 하향. 트립 라인은 고정 50% 라 80→95 는 효과 0 — 실측)
                    → cpu_monitor.log, cpu_app.log, cpu_top_ps.txt
-    Deadlock (03)  MULTI_THREAD_ENABLE true→false   freeze(PID 생존+로그 정지)+curl 타임아웃
+    Deadlock (03)  MULTI_THREAD_ENABLE true→false   freeze(PID 생존+로그 정지+전 스레드 futex)
+                   (CPU_MAX_OCCUPY=10 고정. curl 은 정상 모드에서도 무응답이라 판별에 쓰지 않음)
                    → deadlock_monitor.log, deadlock_app.log, deadlock_ps_top.txt
-    Schedule (04)  MULTI_THREAD_ENABLE=true (정상)   Worker-A/B/C 로그
+    Schedule (04)  MULTI_THREAD_ENABLE=false CPU=10 (Healthy)  [Scheduler]/[Thread-A|B|C] 태그 로그
                    → scheduling_workers.log, scheduling_top_h.txt
+
+  관제 샘플 1줄 포맷 (monitor.sh 와 동일):
+    [TS] PID:n SYS_CPU:x% SYS_MEM:y% PROC_CPU:z% PROC_RSS:wMB DISK_USED:d%
+      SYS_*  = 호스트 전체   PROC_* = 대상 프로세스(B1-2-A1/A4 가 요구하는 지표)
 
   실제 실행:  bash 00_run_experiments.sh all
 EOF

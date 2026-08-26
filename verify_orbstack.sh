@@ -333,7 +333,7 @@ s_monitor() {
     narrate "관제 — monitor.sh 수동 실행" \
 "운영 자동화 스크립트 monitor.sh 를 agent-admin 권한으로 1회 실행한다.
   • [HEALTH CHECK] 프로세스 agent-leak-app 생존 + 포트 15034 LISTEN
-  • [RESOURCE]     CPU / MEM / DISK 사용률 수집
+  • [RESOURCE]     SYS CPU/MEM/DISK + 대상 프로세스 PROC_CPU/PROC_RSS 수집
   • [INFO]         /var/log/agent-app/monitor.log 에 1줄 누적"
     section "monitor.sh — manual run"
     msh 'sudo -iu agent-admin bash -lc "/home/agent-admin/agent-app/bin/monitor.sh"' \
@@ -344,7 +344,8 @@ v_monitor() {
     msh_q 'sudo test -s /var/log/agent-app/monitor.log' || die "monitor.log is empty"
     local last
     last="$(msh_q 'sudo tail -n1 /var/log/agent-app/monitor.log')"
-    echo "$last" | grep -qE '^\[[0-9-]+ [0-9:]+\] PID:[0-9-]+ CPU:[0-9.]+% MEM:[0-9.]+% DISK_USED:[0-9]+%$' \
+    # monitor.sh 는 시스템(SYS_*) / 대상 프로세스(PROC_*) 컬럼을 함께 남긴다.
+    echo "$last" | grep -qE '^\[[0-9-]+ [0-9:]+\] PID:[0-9-]+ SYS_CPU:[0-9.]+% SYS_MEM:[0-9.]+% PROC_CPU:[0-9.]+% PROC_RSS:[0-9.]+MB DISK_USED:[0-9]+%$' \
         || die "monitor.log line format mismatch: $last"
     ok "monitor.sh ran + valid monitor.log line appended"
 }

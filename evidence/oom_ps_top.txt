@@ -1,19 +1,372 @@
-# OOM 실험 — ps / top 캡처 (Before, 종료 직전)
+# =============================================================================
+# OOM 케이스 — ps / top 스냅샷  [B1-2-E-OOM1 / B1-2-A1]
+# =============================================================================
+#   ※ 이 파일은 위 환경에서 실제로 실행해 받은 산출물이다. 과제 PDF 예시가 아니다.
+#   수집 시각: 2026-08-26 09:02:35 ~ 09:06:13 (§1·§2) / 09:23:20 ~ 09:23:52 (§3) (KST)
+#   호스트   : devjsy / Ubuntu 24.04.4 LTS / Linux 6.8.0-138-generic x86_64 / 16 vCPU / 62 GiB RAM / CLK_TCK=100
+#   실행 계정: ashofrondol (uid=1000) — root 아님 (B1-2-P1 충족)
+#   바이너리 : $AGENT_HOME/agent-leak-app  (md5 0fb02e12554328b32e6e1adac861630e, repo bin/ 과 동일)
+#
+#   사전 환경변수:
+#   export AGENT_HOME=/home/ashofrondol/b12_sandbox/agent-app
+#   export AGENT_PORT=15034
+#   export AGENT_UPLOAD_DIR="$AGENT_HOME/upload_files"
+#   export AGENT_KEY_PATH="$AGENT_HOME/api_keys"      # secret.key = "agent_api_key_test"
+#   export AGENT_LOG_DIR=/home/ashofrondol/b12_sandbox/logs
+#   실험 환경변수: Before: MEMORY_LIMIT=256 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=false / After: MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=false
+#
+#   수집 명령:
+#   cd $REPO && EVIDENCE_DIR="$PWD/evidence" SAMPLE_INTERVAL=3 AFTER_FACTOR=60 OOM_BEFORE_TIMEOUT=300 \
+#     bash src/experiments/00_run_experiments.sh oom        # §1·§2 (12초마다 자동 스냅샷)
+#   
+#   # §3 은 같은 Before 조합으로 앱을 한 번 더 직접 띄워 손으로 받은 보강 캡처다:
+#   cd $AGENT_HOME && nohup ./agent-leak-app > /dev/null 2>&1 &   # MEMORY_LIMIT=256 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=false
+#   PID=$(pgrep -x agent-leak-app | tail -n1)
+#   ps -o pid,ppid,rss,vsz,pcpu,pmem,stat,etime,cmd -p $PID
+#   grep -E '^(Rss|Pss|Private_Dirty)' /proc/$PID/smaps_rollup     # 익명 heap 실제 증가분
+#   ps -eo pid,rss,pmem,comm --sort=-rss | head -8                 # 시스템 전체와 비교
+#
+#   스냅샷 대상 PID 는 PyInstaller onefile 의 '자식(워커)' 이다. 부모는 압축 해제용 부트로더
+#     스텁이라 RSS 가 18MB 근처에 고정돼 워크로드가 보이지 않는다 (ps 의 PPID 열로 확인 가능).
+#   Before/After 는 파일 안에서 시각으로 구분된다: 09:02:37~09:03:11 = Before, 09:03:12~ = After.
+# =============================================================================
 
-##### 14:10:20  ps -o pid,ppid,rss,vsz,cmd -C python3 #####
-   PID   PPID    RSS    VSZ CMD
- 12345   2210 262144 318472 /usr/bin/python3 ./agent-leak-app
-# RSS=262144 KB ≈ 256MB  ← MEMORY_LIMIT 와 일치
 
-##### 14:10:20  top -bn1 -p 12345 #####
-top - 14:10:20 up 12 days,  1:48,  2 users,  load average: 0.18, 0.21, 0.25
-Tasks:   1 total,   0 running,   1 sleeping
-%Cpu(s):  1.5 us,  0.4 sy,  0.0 ni, 98.0 id
+#-----------------------------------------------------------------------------
+# §1·§2. 실험 파이프라인 자동 스냅샷 (12초 간격) — Before 및 After
+#-----------------------------------------------------------------------------
 
-  PID USER       PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
-12345 agent-admin 20  0  311M   256M  4.2M S   1.5  96.5   0:08.31 python3
+##### 09:02:38  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2738539 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2738539 2738533 18088  23084  3.2 SN         00:01 ./agent-leak-app
 
+##### 09:02:38  top -bn1 -p 2738539 #####
+top - 09:02:38 up 3 days, 16:13,  4 users,  load average: 0.80, 0.88, 0.92
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  0.6 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15217.4 free,  23833.1 used,  25369.2 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39844.8 avail Mem 
 
-##### 14:10:23  ps -p 12345  (종료 직후) #####
-  PID TTY          TIME CMD
-# (출력 없음 — 프로세스 종료됨)
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2738539 ashofro+  30  10   23084  18088   9764 S   0.0   0.0   0:00.04 agent-l+
+
+##### 09:02:51  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2738539 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2738539 2738533 146108 151104 0.6 SN         00:14 ./agent-leak-app
+
+##### 09:02:51  top -bn1 -p 2738539 #####
+top - 09:02:51 up 3 days, 16:13,  4 users,  load average: 0.77, 0.87, 0.92
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  0.6 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15083.5 free,  23966.9 used,  25369.2 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39710.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2738539 ashofro+  30  10  151104 146108   9764 S   0.0   0.2   0:00.10 agent-l+
+
+##### 09:03:04  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2738539 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2738539 2738533 248524 253520 0.5 SN         00:27 ./agent-leak-app
+
+##### 09:03:04  top -bn1 -p 2738539 #####
+top - 09:03:04 up 3 days, 16:13,  4 users,  load average: 0.89, 0.89, 0.92
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  0.6 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14990.1 free,  24060.3 used,  25369.3 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39617.6 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2738539 ashofro+  30  10  253520 248524   9764 S   0.0   0.4   0:00.15 agent-l+
+
+##### 09:03:11  ps -p 2738539  (종료 직후) #####
+    PID TT           TIME CMD
+# (헤더만 보이면 프로세스 종료됨)
+
+##### 09:03:12  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 18084  23084  3.1 SN         00:01 ./agent-leak-app
+
+##### 09:03:12  top -bn1 -p 2739609 #####
+top - 09:03:12 up 3 days, 16:13,  4 users,  load average: 0.81, 0.87, 0.92
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  2.5 sy,  0.0 ni, 96.9 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15189.5 free,  23860.9 used,  25369.3 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39817.0 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10   23084  18084   9764 S   0.0   0.0   0:00.04 agent-l+
+
+##### 09:03:25  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 120780 273988 0.8 SNl        00:14 ./agent-leak-app
+
+##### 09:03:25  top -bn1 -p 2739609 #####
+top - 09:03:26 up 3 days, 16:14,  4 users,  load average: 0.77, 0.86, 0.91
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  2.5 sy,  0.0 ni, 96.9 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15110.8 free,  23939.5 used,  25369.4 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39738.4 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  273988 120780   9828 S   0.0   0.2   0:00.13 agent-l+
+
+##### 09:03:39  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 248800 402008 0.7 SNl        00:27 ./agent-leak-app
+
+##### 09:03:39  top -bn1 -p 2739609 #####
+top - 09:03:39 up 3 days, 16:14,  4 users,  load average: 0.60, 0.82, 0.90
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  1.2 us,  1.2 sy,  0.0 ni, 97.5 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14985.2 free,  24065.1 used,  25369.4 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39612.8 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  402008 248800   9828 S  10.0   0.4   0:00.23 agent-l+
+
+##### 09:03:52  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 351216 504424 0.7 SNl        00:41 ./agent-leak-app
+
+##### 09:03:52  top -bn1 -p 2739609 #####
+top - 09:03:52 up 3 days, 16:14,  4 users,  load average: 0.51, 0.79, 0.89
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  1.9 us,  3.7 sy,  0.0 ni, 93.8 id,  0.0 wa,  0.0 hi,  0.6 si,  0.0 st 
+MiB Mem :  63677.9 total,  14760.2 free,  24290.1 used,  25369.5 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39387.8 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  504424 351216   9828 S   0.0   0.5   0:00.32 agent-l+
+
+##### 09:04:05  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 479236 632444 0.7 SNl        00:54 ./agent-leak-app
+
+##### 09:04:05  top -bn1 -p 2739609 #####
+top - 09:04:06 up 3 days, 16:14,  4 users,  load average: 0.39, 0.75, 0.87
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  1.8 sy,  0.0 ni, 97.5 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14619.5 free,  24430.7 used,  25369.5 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39247.2 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  632444 479236   9828 S   0.0   0.7   0:00.42 agent-l+
+
+##### 09:04:19  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 18364 171572  0.7 SNl        01:07 ./agent-leak-app
+
+##### 09:04:19  top -bn1 -p 2739609 #####
+top - 09:04:19 up 3 days, 16:14,  4 users,  load average: 0.30, 0.72, 0.86
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  1.9 sy,  0.0 ni, 97.5 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15066.1 free,  23984.0 used,  25369.5 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39693.8 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  171572  18364   9828 S   0.0   0.0   0:00.53 agent-l+
+
+##### 09:04:32  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 146372 302644 0.7 SNl        01:21 ./agent-leak-app
+
+##### 09:04:32  top -bn1 -p 2739609 #####
+top - 09:04:32 up 3 days, 16:15,  4 users,  load average: 0.26, 0.69, 0.85
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  0.6 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14962.8 free,  24087.3 used,  25369.5 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39590.6 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  302644 146372   9828 S   0.0   0.2   0:00.64 agent-l+
+
+##### 09:04:45  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 248780 433716 0.7 SNl        01:34 ./agent-leak-app
+
+##### 09:04:45  top -bn1 -p 2739609 #####
+top - 09:04:46 up 3 days, 16:15,  4 users,  load average: 0.20, 0.66, 0.84
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  0.6 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14853.8 free,  24196.3 used,  25369.6 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39481.6 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  433716 248780   9828 S   0.0   0.4   0:00.72 agent-l+
+
+##### 09:04:59  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 351188 564788 0.7 SNl        01:47 ./agent-leak-app
+
+##### 09:04:59  top -bn1 -p 2739609 #####
+top - 09:04:59 up 3 days, 16:15,  4 users,  load average: 0.16, 0.63, 0.82
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.0 us,  0.6 sy,  0.0 ni, 99.4 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14849.9 free,  24200.1 used,  25369.7 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39477.8 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  564788 376788   9828 S  10.0   0.6   0:00.81 agent-l+
+
+##### 09:05:12  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 479196 695860 0.7 SNl        02:01 ./agent-leak-app
+
+##### 09:05:12  top -bn1 -p 2739609 #####
+top - 09:05:12 up 3 days, 16:15,  4 users,  load average: 0.21, 0.62, 0.82
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  0.6 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14721.2 free,  24328.8 used,  25369.7 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39349.1 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  695860 479196   9828 S   0.0   0.7   0:00.90 agent-l+
+
+##### 09:05:25  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 69564 171572  0.7 SNl        02:14 ./agent-leak-app
+
+##### 09:05:25  top -bn1 -p 2739609 #####
+top - 09:05:26 up 3 days, 16:16,  4 users,  load average: 0.16, 0.59, 0.80
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  1.2 sy,  0.0 ni, 98.2 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15093.5 free,  23956.2 used,  25370.0 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39721.7 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  171572  69564   9828 S   0.0   0.1   0:01.02 agent-l+
+
+##### 09:05:39  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 146372 302644 0.7 SNl        02:27 ./agent-leak-app
+
+##### 09:05:39  top -bn1 -p 2739609 #####
+top - 09:05:39 up 3 days, 16:16,  4 users,  load average: 0.20, 0.58, 0.80
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  1.2 sy,  0.0 ni, 98.2 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  15017.1 free,  24032.6 used,  25370.1 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39645.3 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  302644 146372   9828 S   0.0   0.2   0:01.09 agent-l+
+
+##### 09:05:52  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 248780 433716 0.7 SNl        02:41 ./agent-leak-app
+
+##### 09:05:52  top -bn1 -p 2739609 #####
+top - 09:05:52 up 3 days, 16:16,  4 users,  load average: 0.25, 0.57, 0.79
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.0 us,  0.6 sy,  0.0 ni, 99.4 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14929.0 free,  24120.6 used,  25370.1 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39557.2 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  433716 248780   9828 S   0.0   0.4   0:01.18 agent-l+
+
+##### 09:06:05  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 376788 564788 0.7 SNl        02:54 ./agent-leak-app
+
+##### 09:06:05  top -bn1 -p 2739609 #####
+top - 09:06:06 up 3 days, 16:16,  4 users,  load average: 0.55, 0.63, 0.81
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  1.2 us,  0.6 sy,  0.0 ni, 98.1 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14797.7 free,  24251.9 used,  25370.1 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39425.9 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  564788 376788   9828 S   0.0   0.6   0:01.29 agent-l+
+
+##### 09:06:12  ps -o pid,ppid,rss,vsz,pcpu,stat,etime,cmd -p 2739609 #####
+    PID    PPID   RSS    VSZ %CPU STAT     ELAPSED CMD
+2739609 2739603 428000 630324 0.7 SNl        03:01 ./agent-leak-app
+
+##### 09:06:12  top -bn1 -p 2739609 #####
+top - 09:06:12 up 3 days, 16:16,  4 users,  load average: 0.50, 0.62, 0.80
+Tasks:   1 total,   0 running,   1 sleeping,   0 stopped,   0 zombie
+%Cpu(s):  0.6 us,  0.6 sy,  0.0 ni, 98.8 id,  0.0 wa,  0.0 hi,  0.0 si,  0.0 st 
+MiB Mem :  63677.9 total,  14748.3 free,  24301.4 used,  25370.1 buff/cache     
+MiB Swap:   8192.0 total,   8192.0 free,      0.0 used.  39376.5 avail Mem 
+
+    PID USER      PR  NI    VIRT    RES    SHR S  %CPU  %MEM     TIME+ COMMAND
+2739609 ashofro+  30  10  630324 428000   9828 S   0.0   0.7   0:01.33 agent-l+
+
+#-----------------------------------------------------------------------------
+# §3. 보강 캡처 — /proc/<pid>/smaps_rollup 익명 heap 증가 + 시스템 전체 RSS 순위 (별도 실행)
+#-----------------------------------------------------------------------------
+
+##### t≈5s  2026-08-26 09:23:24 #####
+$ ps -o pid,ppid,rss,vsz,pcpu,pmem,stat,etime,cmd -p 2773076
+    PID    PPID   RSS    VSZ %CPU %MEM STAT     ELAPSED CMD
+2773076 2773075 43688  48688  1.2  0.0 SN         00:04 ./agent-leak-app
+$ grep -c '' /proc/2773076/smaps_rollup >/dev/null; grep -E '^(Rss|Pss|Private_Dirty)' /proc/2773076/smaps_rollup
+Rss:               43688 kB
+Pss:               41026 kB
+Pss_Dirty:         33992 kB
+Pss_Anon:          33928 kB
+Pss_File:           7098 kB
+Pss_Shmem:             0 kB
+Private_Dirty:     33992 kB
+$ tail -1 $AGENT_LOG_DIR/agent_app.log
+2026-08-26 09:23:21,379 [INFO] [MemoryWorker] Current Heap: 25MB
+$ free -m | head -2
+               total        used        free      shared  buff/cache   available
+Mem:           63677       23890       15139          30       25389       39787
+
+##### t≈15s  2026-08-26 09:23:34 #####
+$ ps -o pid,ppid,rss,vsz,pcpu,pmem,stat,etime,cmd -p 2773076
+    PID    PPID   RSS    VSZ %CPU %MEM STAT     ELAPSED CMD
+2773076 2773075 146104 151104 0.6  0.2 SN         00:15 ./agent-leak-app
+$ grep -c '' /proc/2773076/smaps_rollup >/dev/null; grep -E '^(Rss|Pss|Private_Dirty)' /proc/2773076/smaps_rollup
+Rss:              146104 kB
+Pss:              143442 kB
+Pss_Dirty:        136344 kB
+Pss_Anon:         136344 kB
+Pss_File:           7098 kB
+Pss_Shmem:             0 kB
+Private_Dirty:    136344 kB
+$ tail -1 $AGENT_LOG_DIR/agent_app.log
+2026-08-26 09:23:33,479 [INFO] [MemoryWorker] Current Heap: 125MB
+$ free -m | head -2
+               total        used        free      shared  buff/cache   available
+Mem:           63677       23989       15041          30       25389       39688
+
+##### t≈27s  2026-08-26 09:23:46 #####
+$ ps -o pid,ppid,rss,vsz,pcpu,pmem,stat,etime,cmd -p 2773076
+    PID    PPID   RSS    VSZ %CPU %MEM STAT     ELAPSED CMD
+2773076 2773075 248520 253520 0.5  0.3 SN         00:27 ./agent-leak-app
+$ grep -c '' /proc/2773076/smaps_rollup >/dev/null; grep -E '^(Rss|Pss|Private_Dirty)' /proc/2773076/smaps_rollup
+Rss:              248520 kB
+Pss:              245860 kB
+Pss_Dirty:        238760 kB
+Pss_Anon:         238760 kB
+Pss_File:           7100 kB
+Pss_Shmem:             0 kB
+Private_Dirty:    238760 kB
+$ tail -1 $AGENT_LOG_DIR/agent_app.log
+2026-08-26 09:23:45,566 [INFO] [MemoryWorker] Current Heap: 225MB
+$ free -m | head -2
+               total        used        free      shared  buff/cache   available
+Mem:           63677       24091       14939          30       25389       39586
+
+##### 임계 직전 시스템 전체 RSS 상위 (2026-08-26 09:23:46) #####
+$ ps -eo pid,rss,pmem,comm --sort=-rss | head -8
+    PID   RSS %MEM COMMAND
+2363945 19539584 29.9 java
+2472117 697788  1.0 claude
+2534710 557024  0.8 claude
+2469162 488964  0.7 MainThread
+2542987 487100  0.7 claude
+2764542 409160  0.6 claude
+ 475956 363972  0.5 grafana
+
+##### 프로세스 종료 직후 (2026-08-26 09:23:52) #####
+$ ps -p 2773076 -o pid,tty,time,cmd     # (헤더만 나오면 소멸)
+    PID TT           TIME CMD
+$ pgrep -x agent-leak-app | wc -l
+0
+$ tail -3 $AGENT_LOG_DIR/agent_app.log
+2026-08-26 09:23:51,617 [INFO] [MemoryWorker] Current Heap: 275MB
+2026-08-26 09:23:51,618 [CRITICAL] [MemoryGuard] Memory limit exceeded (275MB >= 256MB) / (Recommend Over 256MB)
+2026-08-26 09:23:51,618 [CRITICAL] [MemoryGuard] Self-terminating process 2773076 to prevent system instability.

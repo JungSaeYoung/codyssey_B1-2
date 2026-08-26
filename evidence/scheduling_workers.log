@@ -1,24 +1,206 @@
-# 정상 가동 구간(MULTI_THREAD_ENABLE=true, 데드락 미발생 60초)에서
-# 워커 라인만 grep 으로 추출한 결과 — Round-Robin 추론 근거
+# =============================================================================
+# 스케줄링 추론용 워커/스케줄러 로그 (보너스)  [B1-2-B1 / B1-2-B2]
+# =============================================================================
+#   ※ 이 파일은 위 환경에서 실제로 실행해 받은 산출물이다. 과제 PDF 예시가 아니다.
+#   수집 시각: 2026-08-26 09:18:09 ~ 09:20:15 (KST)
+#   호스트   : devjsy / Ubuntu 24.04.4 LTS / Linux 6.8.0-138-generic x86_64 / 16 vCPU / 62 GiB RAM / CLK_TCK=100
+#   실행 계정: ashofrondol (uid=1000) — root 아님 (B1-2-P1 충족)
+#   바이너리 : $AGENT_HOME/agent-leak-app  (md5 0fb02e12554328b32e6e1adac861630e, repo bin/ 과 동일)
+#
+#   사전 환경변수:
+#   export AGENT_HOME=/home/ashofrondol/b12_sandbox/agent-app
+#   export AGENT_PORT=15034
+#   export AGENT_UPLOAD_DIR="$AGENT_HOME/upload_files"
+#   export AGENT_KEY_PATH="$AGENT_HOME/api_keys"      # secret.key = "agent_api_key_test"
+#   export AGENT_LOG_DIR=/home/ashofrondol/b12_sandbox/logs
+#   실험 환경변수: MEMORY_LIMIT=512 CPU_MAX_OCCUPY=10 MULTI_THREAD_ENABLE=false  (= [Healthy System Monitoring] 시나리오)
+#
+#   수집 명령:
+#   cd $REPO && EVIDENCE_DIR="$PWD/evidence" SAMPLE_INTERVAL=3 SCHED_DURATION=120 \
+#     bash src/experiments/00_run_experiments.sh scheduling
+#   
+#   # 04_scheduling.sh 가 내부적으로 하는 일:
+#   grep -E "\[[A-Za-z0-9_-]*(Worker|Thread|Scheduler)[A-Za-z0-9_-]*\]" $AGENT_LOG_DIR/agent_app.log \
+#     > evidence/scheduling_workers.log
+#
+#   왜 MULTI_THREAD_ENABLE=false 인가 — 실측 결과 이 앱은 부팅 시 Resource Check 로 시나리오를 고른다.
+#     MULTI_THREAD_ENABLE=true 는 데드락 시나리오라 9초 만에 전 스레드가 멈춰 교체 패턴을 볼 수 없다.
+#     [Scheduler] 가 Thread-A/B/C 를 번갈아 돌리는 구간은 세 값이 모두 안전할 때 선택되는
+#     [Healthy System Monitoring] 시나리오에서만 나온다.
+#   수집된 태그 6종: [Scheduler] [Thread-A] [Thread-B] [Thread-C] [MemoryWorker] [CpuWorker]
+# =============================================================================
 
-[2026-05-11 14:00:00.100] [Worker-A] Task started.  progress=10%
-[2026-05-11 14:00:00.150] [Worker-A] running ...    progress=20%
-[2026-05-11 14:00:00.201] [Worker-B] Task started.  progress=10%
-[2026-05-11 14:00:00.250] [Worker-B] running ...    progress=20%
-[2026-05-11 14:00:00.301] [Worker-C] Task started.  progress=10%
-[2026-05-11 14:00:00.350] [Worker-C] running ...    progress=20%
-[2026-05-11 14:00:00.401] [Worker-A] resumed.       progress=30%
-[2026-05-11 14:00:00.450] [Worker-A] running ...    progress=40%
-[2026-05-11 14:00:00.501] [Worker-B] resumed.       progress=30%
-[2026-05-11 14:00:00.550] [Worker-B] running ...    progress=40%
-[2026-05-11 14:00:00.601] [Worker-C] resumed.       progress=30%
-[2026-05-11 14:00:00.650] [Worker-C] running ...    progress=40%
-[2026-05-11 14:00:00.701] [Worker-A] resumed.       progress=50%
-[2026-05-11 14:00:00.750] [Worker-A] running ...    progress=60%
-[2026-05-11 14:00:00.801] [Worker-B] resumed.       progress=50%
-[2026-05-11 14:00:00.850] [Worker-B] running ...    progress=60%
-[2026-05-11 14:00:00.901] [Worker-C] resumed.       progress=50%
-[2026-05-11 14:00:00.950] [Worker-C] running ...    progress=60%
 
-# 교체 간격 ≈ 50ms (101ms 마다 워커 1개 차례 = 약 50ms 작업 + 약 50ms 다음 워커 시작)
-# 순서: A → B → C → A → B → C → ...  (공평한 라운드 로빈)
+#-----------------------------------------------------------------------------
+# §1. 원본 발췌 — agent_app.log 에서 스케줄러/워커 태그 줄만 grep (총 133줄)
+#-----------------------------------------------------------------------------
+
+2026-08-26 09:18:11,331 [INFO] [Scheduler] Task Scheduler Initialized.
+2026-08-26 09:18:11,331 [INFO] [Scheduler] Registered Tasks: ['Thread-A', 'Thread-B', 'Thread-C']
+2026-08-26 09:18:11,331 [INFO] [Scheduler] Starting task execution...
+2026-08-26 09:18:11,331 [INFO] [Thread-A] Task Started. Calculating... (20%)
+2026-08-26 09:18:11,382 [INFO] [Thread-A] Calculating... (40%)
+2026-08-26 09:18:11,433 [INFO] [Thread-A] Preempted. Progress saved at (40%)
+2026-08-26 09:18:11,483 [INFO] [Thread-B] Task Started. Calculating... (20%)
+2026-08-26 09:18:11,534 [INFO] [Thread-B] Calculating... (40%)
+2026-08-26 09:18:11,585 [INFO] [Thread-B] Preempted. Progress saved at (40%)
+2026-08-26 09:18:11,636 [INFO] [Thread-C] Task Started. Calculating... (20%)
+2026-08-26 09:18:11,686 [INFO] [Thread-C] Calculating... (40%)
+2026-08-26 09:18:11,737 [INFO] [Thread-C] Preempted. Progress saved at (40%)
+2026-08-26 09:18:11,788 [INFO] [Thread-A] Resumed. Calculating... (60%)
+2026-08-26 09:18:11,839 [INFO] [Thread-A] Calculating... (80%)
+2026-08-26 09:18:11,890 [INFO] [Thread-A] Preempted. Progress saved at (80%)
+2026-08-26 09:18:11,940 [INFO] [Thread-B] Resumed. Calculating... (60%)
+2026-08-26 09:18:11,991 [INFO] [Thread-B] Calculating... (80%)
+2026-08-26 09:18:12,042 [INFO] [Thread-B] Preempted. Progress saved at (80%)
+2026-08-26 09:18:12,092 [INFO] [Thread-C] Resumed. Calculating... (60%)
+2026-08-26 09:18:12,143 [INFO] [Thread-C] Calculating... (80%)
+2026-08-26 09:18:12,194 [INFO] [Thread-C] Preempted. Progress saved at (80%)
+2026-08-26 09:18:12,245 [INFO] [Thread-A] Resumed. Calculating... (100%)
+2026-08-26 09:18:12,296 [INFO] [Thread-B] Resumed. Calculating... (100%)
+2026-08-26 09:18:12,347 [INFO] [Thread-C] Resumed. Calculating... (100%)
+2026-08-26 09:18:12,398 [INFO] [Scheduler] All tasks completed.
+2026-08-26 09:18:12,411 [INFO] [CpuWorker] Started. Maximum CPU Limit: 10%
+2026-08-26 09:18:12,411 [INFO] [MemoryWorker] Current Heap: 25MB
+2026-08-26 09:18:12,412 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:18:14,522 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:18:15,437 [INFO] [MemoryWorker] Current Heap: 50MB
+2026-08-26 09:18:15,528 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:18:17,633 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:18:18,456 [INFO] [MemoryWorker] Current Heap: 75MB
+2026-08-26 09:18:18,639 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:18:21,483 [INFO] [MemoryWorker] Current Heap: 100MB
+2026-08-26 09:18:21,756 [INFO] [CpuWorker] Current Load: 7.98%
+2026-08-26 09:18:23,867 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:18:24,500 [INFO] [MemoryWorker] Current Heap: 125MB
+2026-08-26 09:18:24,873 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:18:27,528 [INFO] [MemoryWorker] Current Heap: 150MB
+2026-08-26 09:18:27,988 [INFO] [CpuWorker] Current Load: 7.79%
+2026-08-26 09:18:30,098 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:18:30,555 [INFO] [MemoryWorker] Current Heap: 175MB
+2026-08-26 09:18:31,104 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:18:33,583 [INFO] [MemoryWorker] Current Heap: 200MB
+2026-08-26 09:18:34,220 [INFO] [CpuWorker] Current Load: 8.95%
+2026-08-26 09:18:36,330 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:18:36,611 [INFO] [MemoryWorker] Current Heap: 225MB
+2026-08-26 09:18:37,336 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:18:39,445 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:18:39,639 [INFO] [MemoryWorker] Current Heap: 250MB
+2026-08-26 09:18:40,446 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:18:42,556 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:18:42,667 [INFO] [MemoryWorker] Current Heap: 275MB
+2026-08-26 09:18:43,562 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:18:45,672 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:18:45,694 [INFO] [MemoryWorker] Current Heap: 300MB
+2026-08-26 09:18:46,678 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:18:48,721 [INFO] [MemoryWorker] Current Heap: 325MB
+2026-08-26 09:18:48,787 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:18:49,792 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:18:51,749 [INFO] [MemoryWorker] Current Heap: 350MB
+2026-08-26 09:18:51,903 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:18:52,909 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:18:54,776 [INFO] [MemoryWorker] Current Heap: 375MB
+2026-08-26 09:18:56,021 [INFO] [CpuWorker] Current Load: 8.21%
+2026-08-26 09:18:57,796 [INFO] [MemoryWorker] Current Heap: 400MB
+2026-08-26 09:18:58,132 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:18:59,138 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:00,824 [INFO] [MemoryWorker] Current Heap: 425MB
+2026-08-26 09:19:01,248 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:02,253 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:19:03,838 [INFO] [MemoryWorker] Current Heap: 450MB
+2026-08-26 09:19:05,365 [INFO] [CpuWorker] Current Load: 9.61%
+2026-08-26 09:19:06,864 [INFO] [MemoryWorker] Current Heap: 475MB
+2026-08-26 09:19:07,475 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:19:08,476 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:09,888 [INFO] [MemoryWorker] Current Heap: 500MB
+2026-08-26 09:19:10,587 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:11,593 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:19:12,914 [INFO] [MemoryWorker] Current Heap: 525MB
+2026-08-26 09:19:12,915 [WARNING] [MemoryWorker] Memory Usage Reached Limit (525MB). Starting cleanup...
+2026-08-26 09:19:14,709 [INFO] [CpuWorker] Current Load: 5.67%
+2026-08-26 09:19:16,820 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:19:17,825 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:17,996 [INFO] [MemoryWorker] Current Heap: 25MB
+2026-08-26 09:19:19,936 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:20,942 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:19:21,024 [INFO] [MemoryWorker] Current Heap: 50MB
+2026-08-26 09:19:23,053 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:19:24,048 [INFO] [MemoryWorker] Current Heap: 75MB
+2026-08-26 09:19:24,059 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:26,170 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:27,076 [INFO] [MemoryWorker] Current Heap: 100MB
+2026-08-26 09:19:27,175 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:19:30,105 [INFO] [MemoryWorker] Current Heap: 125MB
+2026-08-26 09:19:30,288 [INFO] [CpuWorker] Current Load: 7.72%
+2026-08-26 09:19:33,129 [INFO] [MemoryWorker] Current Heap: 150MB
+2026-08-26 09:19:33,405 [INFO] [CpuWorker] Current Load: 9.28%
+2026-08-26 09:19:35,515 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:19:36,156 [INFO] [MemoryWorker] Current Heap: 175MB
+2026-08-26 09:19:36,521 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:38,630 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:39,172 [INFO] [MemoryWorker] Current Heap: 200MB
+2026-08-26 09:19:39,636 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:19:41,747 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:19:42,200 [INFO] [MemoryWorker] Current Heap: 225MB
+2026-08-26 09:19:42,753 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:44,859 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:45,226 [INFO] [MemoryWorker] Current Heap: 250MB
+2026-08-26 09:19:45,864 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:19:47,973 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:19:48,253 [INFO] [MemoryWorker] Current Heap: 275MB
+2026-08-26 09:19:48,977 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:51,081 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:51,280 [INFO] [MemoryWorker] Current Heap: 300MB
+2026-08-26 09:19:52,086 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:19:54,191 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:19:54,297 [INFO] [MemoryWorker] Current Heap: 325MB
+2026-08-26 09:19:55,195 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:19:57,315 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:19:57,315 [INFO] [MemoryWorker] Current Heap: 350MB
+2026-08-26 09:19:58,320 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:20:00,331 [INFO] [MemoryWorker] Current Heap: 375MB
+2026-08-26 09:20:00,429 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:20:01,434 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:20:03,349 [INFO] [MemoryWorker] Current Heap: 400MB
+2026-08-26 09:20:03,545 [INFO] [CpuWorker] Cooldown complete (5.00%). Resuming load increase...
+2026-08-26 09:20:04,551 [INFO] [CpuWorker] Current Load: 5.00%
+2026-08-26 09:20:06,376 [INFO] [MemoryWorker] Current Heap: 425MB
+2026-08-26 09:20:06,662 [INFO] [CpuWorker] Peak reached (10.00%). Starting cooldown...
+2026-08-26 09:20:07,664 [INFO] [CpuWorker] Current Load: 10.00%
+2026-08-26 09:20:09,403 [INFO] [MemoryWorker] Current Heap: 450MB
+
+#-----------------------------------------------------------------------------
+# §2. §1 의 [Thread-A|B|C] 줄만 뽑아 타임스탬프 차이를 계산한 표 (이 파일에서 파생, 원본 무가공)
+#-----------------------------------------------------------------------------
+
+경과(ms)  간격(ms)  워커        이벤트
+--------  --------  ----------  ------------------------------------------
+       0         -  Thread-A    Task Started. Calculating... (20%)
+      51        51  Thread-A    Calculating... (40%)
+     102        51  Thread-A    Preempted. Progress saved at (40%)
+     152        50  Thread-B    Task Started. Calculating... (20%)
+     203        51  Thread-B    Calculating... (40%)
+     254        51  Thread-B    Preempted. Progress saved at (40%)
+     305        51  Thread-C    Task Started. Calculating... (20%)
+     355        50  Thread-C    Calculating... (40%)
+     406        51  Thread-C    Preempted. Progress saved at (40%)
+     457        51  Thread-A    Resumed. Calculating... (60%)
+     508        51  Thread-A    Calculating... (80%)
+     559        51  Thread-A    Preempted. Progress saved at (80%)
+     609        50  Thread-B    Resumed. Calculating... (60%)
+     660        51  Thread-B    Calculating... (80%)
+     711        51  Thread-B    Preempted. Progress saved at (80%)
+     761        50  Thread-C    Resumed. Calculating... (60%)
+     812        51  Thread-C    Calculating... (80%)
+     863        51  Thread-C    Preempted. Progress saved at (80%)
+     914        51  Thread-A    Resumed. Calculating... (100%)
+     965        51  Thread-B    Resumed. Calculating... (100%)
+    1016        51  Thread-C    Resumed. Calculating... (100%)
+
+이벤트 21개 / 간격 표본 20개 — 최소 50ms, 최대 51ms, 평균 50.8ms, 중앙값 51ms
+워커 등장 순서: Thread-A → Thread-A → Thread-A → Thread-B → Thread-B → Thread-B → Thread-C → Thread-C → Thread-C → Thread-A → Thread-A → Thread-A → Thread-B → Thread-B → Thread-B → Thread-C → Thread-C → Thread-C → Thread-A → Thread-B → Thread-C
+
+# 읽는 법: 한 워커가 연속 3개 이벤트(Started/Calculating → Calculating → Preempted)를 약 102ms 동안
+#          내고 CPU 를 내려놓으면, 약 50ms 뒤 다음 워커가 이어받는다. 순서는 A → B → C → A → B → C 로
+#          고정이고 매 턴 진행률이 20%p 씩 오른다(20→40→60→80→100). 한 워커가 끝날 때까지
+#          독점하지 않으므로 FCFS 가 아니고, 우선순위 편중도 없다.

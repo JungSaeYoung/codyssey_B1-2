@@ -13,7 +13,7 @@
 쉘 명령어를 외워서 푸는 게 아니라, **외부에서 보이는 데이터(로그·관제·시스템 도구) 만으로 프로세스 안과 OS 안에서 무슨 일이 벌어졌는지 역추론**할 수 있는지를 묻는다.
 
 ```
-[관측] monitor.log 의 MEM% 가 96% 까지 올라갔고 SELF-TERMINATED 가 찍혔다
+[관측] monitor.log 의 PROC_RSS 가 17.7MB→267.7MB 로 올랐고 [MemoryGuard] Self-terminating 이 찍혔다
    ↓
 [추론] 어떤 자료구조 위에서, 어떤 정책이, 누구를, 어떤 시그널로 죽였는가?
    ↓
@@ -85,7 +85,7 @@ codyssey_B1-2/
 │       ├── 00_run_experiments.sh   ← 4개 실험 일괄/개별 실행 오케스트레이터
 │       ├── lib_experiment.sh       ← 공통 도구 (설정·관측 루프·증거 스냅샷·요약) — 직접 실행 안 함
 │       ├── 01_oom.sh               ← OOM 재현·검증 (MEMORY_LIMIT 256→512)
-│       ├── 02_cpu.sh               ← CPU 과점유 재현·검증 (CPU_MAX_OCCUPY 80→95)
+│       ├── 02_cpu.sh               ← CPU 과점유 재현·검증 (CPU_MAX_OCCUPY 80→10)
 │       ├── 03_deadlock.sh          ← Deadlock(freeze) 재현·검증 (MULTI_THREAD_ENABLE true→false)
 │       └── 04_scheduling.sh        ← 스케줄링 추론 데이터 수집 (보너스)
 │
@@ -127,8 +127,10 @@ export AGENT_KEY_PATH="$AGENT_HOME/api_keys"
 export AGENT_LOG_DIR="/var/log/agent-app"
 
 # 베이스라인 (정상 가동) — 실험 시 실험_절차서.md 조합표대로 바꿔서 재실행
+#   CPU_MAX_OCCUPY 는 10 이어야 [Healthy System Monitoring] 이 선택된다.
+#   95 로 두면 CPU 과점유 시나리오가 골라져 34초 만에 죽는다(exit 143). 실험_절차서.md §조합표 참고.
 export MEMORY_LIMIT="512"
-export CPU_MAX_OCCUPY="95"
+export CPU_MAX_OCCUPY="10"
 export MULTI_THREAD_ENABLE="false"
 ```
 
@@ -220,9 +222,10 @@ cd $AGENT_HOME
 
 ```bash
 # 한 줄 요약
-# OOM     : MEMORY_LIMIT=256        다른 건 정상 → 10분 후 SELF-TERMINATED
-# CPU     : CPU_MAX_OCCUPY=80       다른 건 정상 → 4분 후 WATCHDOG SIGTERM
-# Deadlock: MULTI_THREAD_ENABLE=true 다른 건 정상 → 2~4분 후 무응답
+# (아래 시간·시그니처는 2026-08-26 실측값. 나머지 두 변수는 안전값 MEMORY_LIMIT=512 / CPU_MAX_OCCUPY=10 고정)
+# OOM     : MEMORY_LIMIT=256        → 0m34s 후 exit 137, [MemoryGuard] Memory limit exceeded + Self-terminating
+# CPU     : CPU_MAX_OCCUPY=80       → 0m30s 후 exit 143, [CpuWorker] CPU Threshold Violated!
+# Deadlock: MULTI_THREAD_ENABLE=true → 부팅 약 9초 후 무응답 (PID 생존, 자가 종료 없음)
 ```
 
 위 절차를 **사람 손 없이 자동 수행**하려면 [src/experiments/](src/experiments/) 의 파이프라인을 쓴다
@@ -241,18 +244,21 @@ QUICK=1 bash 00_run_experiments.sh all   # 대기시간 단축 (배선 확인·�
 ```bash
 # 다른 터미널
 tail -f /var/log/agent-app/monitor.log              # cron 매분 누적
-tail -f $AGENT_LOG_DIR/agent-leak-app.log           # 앱 자체 로그
+tail -f $AGENT_LOG_DIR/agent_app.log               # 앱 자체 로그 (앱이 직접 append)
+tail -f $AGENT_LOG_DIR/agent_app.out               # nohup stdout (부트 시퀀스 [1/6]~[6/6])
 ```
 
 라이브 관찰만으로는 리포트에 넣을 **수치**가 안 나온다. `monitor.log` 에서 추세를 뽑거나(`grep`/`awk`), `src/report.sh` 로 구간 통계(Max/Min·도달 시각·평균)를 산출한다:
 
 ```bash
-# 특정 PID 의 MEM% 시계열만 추출 (Evidence 표/그래프 재료)
-grep "PID:<pid>" /var/log/agent-app/monitor.log | awk -F'MEM:' '{print $2}' | awk -F'%' '{print $1}'
+# 특정 PID 의 PROC_RSS(MB) 시계열만 추출 (Evidence 표/그래프 재료)
+# monitor.log 포맷: [TS] PID:n SYS_CPU:x% SYS_MEM:y% PROC_CPU:z% PROC_RSS:wMB DISK_USED:d%
+#   SYS_* = 호스트 전체 / PROC_* = 대상 프로세스. 프로세스 메모리 증가의 근거는 PROC_RSS 다.
+grep "PID:<pid>" /var/log/agent-app/monitor.log | awk -F'PROC_RSS:' '{print $2}' | awk -F'MB' '{print $1}'
 
-# 구간 통계 — ====== STATISTICS REPORT ====== ([Memory] Maximum 96.8% at 14:10:00 …)
+# 구간 통계 — ====== STATISTICS REPORT ====== ([Process RSS] Maximum … MB at … )
 bash src/report.sh                                          # 전체
-bash src/report.sh "2026-05-11 14:00:00" "2026-05-11 14:11:00"   # 구간 지정
+bash src/report.sh "2026-08-26 09:02:37" "2026-08-26 09:03:11"   # 구간 지정 (OOM Before 실측 구간)
 ```
 
 ---
@@ -299,9 +305,9 @@ bash src/report.sh "2026-05-11 14:00:00" "2026-05-11 14:11:00"   # 구간 지정
 
 | 장애 | 증거 |
 | ---- | ---- |
-| **OOM** | monitor.log MEM% 선형 증가 구간 + `Memory limit exceeded` / `SELF-TERMINATED` 로그 + `MEMORY_LIMIT` 변경 전/후 생존시간 비교 |
-| **CPU** | monitor.log CPU% 급상승 구간 + `WATCHDOG … SIGTERM` 로그 + `CPU_MAX_OCCUPY` 변경 전/후 비교 |
-| **Deadlock** | `ps -ef \| grep agent` PID 존재 + `top -H` 스레드 CPU 0% + `ps -L -o wchan` 의 `futex_wait_queue_me` + 마지막 `WAITING/BLOCKED` 로그 + `MULTI_THREAD_ENABLE=false` 회피 확인 |
+| **OOM** | monitor.log **`PROC_RSS`** 선형 증가 구간(`SYS_MEM` 아님) + `[MemoryGuard] Memory limit exceeded` / `Self-terminating process …` 로그 + 종료 코드 137 + `MEMORY_LIMIT` 변경 전/후 생존시간 비교 |
+| **CPU** | `[CpuWorker] Current Load` 상승 계열 + `/proc/<pid>/stat` 델타로 잰 프로세스 CPU(호스트 전체와 대조) + `[CpuWorker] CPU Threshold Violated!` 로그 + 종료 코드 143 + `CPU_MAX_OCCUPY` 변경 전/후 비교 |
+| **Deadlock** | `ps -ef \| grep agent` PID 존재 + `top -H` 스레드 `TIME+` 정지 + `ps -L -o wchan` 의 `futex_wait_queue`(전 스레드) + 앱 로그 mtime 정지 + 마지막 `WAITING/BLOCKED` 로그 + `MULTI_THREAD_ENABLE=false` 회피 확인 |
 | **(보너스) 스케줄링** | 워커 스레드 로그의 타임스탬프 + 진행률 패턴 → RR / FCFS / Priority / CFS 중 어느 시그니처인지 |
 
 ---
